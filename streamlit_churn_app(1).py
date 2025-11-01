@@ -240,7 +240,7 @@ st.markdown('<h1 class="main-header">🎯 Customer Churn Prediction Platform</h1
 # Sidebar Navigation
 page = st.sidebar.selectbox(
     "🔍 Navigation",
-    ["📤 Upload Data", "🧹 Data Cleaning", "📊 Data Visualization", "🤖 Train Models", "📈 Model Comparison", "🔮 Make Predictions"]
+    ["📤 Upload Data", "📊 Data Visualization", "🧹 Data Cleaning", "🤖 Train Models", "📈 Model Comparison", "🔮 Make Predictions"]
 )
 
 # ==================== PAGE 1: UPLOAD DATA ====================
@@ -279,204 +279,7 @@ if page == "📤 Upload Data":
         })
         st.dataframe(info_df, width='stretch')
 
-# ==================== PAGE 2: DATA CLEANING ====================
-elif page == "🧹 Data Cleaning":
-    st.header("🧹 Data Cleaning & Preparation")
-    
-    if st.session_state.df_raw is None:
-        st.warning("⚠️ Please upload a dataset first!")
-    else:
-        # Use cleaned data if available, otherwise start with raw
-        if st.session_state.df_clean is not None:
-            df = st.session_state.df_clean.copy()
-            st.info("📋 Working with previously cleaned data. You can make additional changes below.")
-        else:
-            df = st.session_state.df_raw.copy()
-        
-        st.subheader("⚙️ Target Column Selection")
-        
-        # Target column selection
-        target_col = st.selectbox(
-            "Select Target Column (Churn)",
-            options=df.columns.tolist(),
-            index=df.columns.tolist().index(st.session_state.target_col) if st.session_state.target_col and st.session_state.target_col in df.columns else (len(df.columns)-1 if 'churn' in str(df.columns).lower() else 0)
-        )
-        
-        st.session_state.target_col = target_col
-        
-        # Show current data quality issues
-        st.subheader("🔍 Data Quality Overview")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Rows", len(df))
-        with col2:
-            st.metric("Total Columns", len(df.columns))
-        with col3:
-            st.metric("Missing Values", df.isnull().sum().sum())
-        with col4:
-            st.metric("Duplicate Rows", df.duplicated().sum())
-        
-        # Missing values details
-        missing_df = pd.DataFrame({
-            'Column': df.columns,
-            'Missing Count': df.isnull().sum().values,
-            'Missing %': (df.isnull().sum().values / len(df) * 100).round(2)
-        })
-        missing_df = missing_df[missing_df['Missing Count'] > 0].sort_values('Missing Count', ascending=False)
-        
-        if len(missing_df) > 0:
-            st.subheader("⚠️ Columns with Missing Values")
-            st.dataframe(missing_df, width='stretch')
-        
-        # Granular cleaning options
-        st.subheader("🛠️ Cleaning Operations")
-        
-        with st.expander("🗑️ Remove Duplicate Rows", expanded=False):
-            if df.duplicated().sum() > 0:
-                st.write(f"Found **{df.duplicated().sum()}** duplicate rows")
-                if st.button("Remove Duplicates"):
-                    df = df.drop_duplicates()
-                    st.session_state.df_clean = df
-                    st.success(f"✅ Removed duplicates! Now {len(df)} rows.")
-                    st.rerun()
-            else:
-                st.info("No duplicates found")
-        
-        with st.expander("🔢 Handle Missing Values (Column-by-Column)", expanded=True):
-            if missing_df.empty:
-                st.info("No missing values found!")
-            else:
-                st.write("💡 **Tip:** Different strategies work better for different features. Try different approaches and check visualizations!")
-                
-                cols_with_missing = missing_df['Column'].tolist()
-                selected_col = st.selectbox("Select column to handle", cols_with_missing)
-                
-                if selected_col:
-                    col_data = df[selected_col]
-                    st.write(f"**{selected_col}**: {col_data.isnull().sum()} missing values ({(col_data.isnull().sum()/len(df)*100):.1f}%)")
-                    
-                    # Determine if numeric or categorical
-                    is_numeric = pd.api.types.is_numeric_dtype(col_data)
-                    
-                    if is_numeric:
-                        strategy = st.radio(
-                            f"Strategy for {selected_col}",
-                            ["Keep missing (let model handle)", "Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"],
-                            key=f"strategy_{selected_col}"
-                        )
-                    else:
-                        strategy = st.radio(
-                            f"Strategy for {selected_col}",
-                            ["Keep missing (let model handle)", "Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"],
-                            key=f"strategy_{selected_col}"
-                        )
-                    
-                    if st.button(f"Apply to {selected_col}", type="primary"):
-                        if strategy == "Keep missing (let model handle)":
-                            st.info("✅ Keeping missing values. The model preprocessing will handle them.")
-                        elif strategy == "Fill with Mean":
-                            df[selected_col].fillna(df[selected_col].mean(), inplace=True)
-                            st.success(f"✅ Filled {selected_col} with mean value: {df[selected_col].mean():.2f}")
-                        elif strategy == "Fill with Median":
-                            df[selected_col].fillna(df[selected_col].median(), inplace=True)
-                            st.success(f"✅ Filled {selected_col} with median value: {df[selected_col].median():.2f}")
-                        elif strategy == "Fill with Zero":
-                            df[selected_col].fillna(0, inplace=True)
-                            st.success(f"✅ Filled {selected_col} with zeros")
-                        elif strategy == "Fill with Most Frequent":
-                            most_frequent = df[selected_col].mode()[0]
-                            df[selected_col].fillna(most_frequent, inplace=True)
-                            st.success(f"✅ Filled {selected_col} with most frequent value: {most_frequent}")
-                        elif strategy == "Fill with 'Unknown'":
-                            df[selected_col].fillna('Unknown', inplace=True)
-                            st.success(f"✅ Filled {selected_col} with 'Unknown'")
-                        elif strategy == "Drop rows with missing":
-                            before = len(df)
-                            df = df.dropna(subset=[selected_col])
-                            st.success(f"✅ Dropped {before - len(df)} rows with missing {selected_col}")
-                        
-                        st.session_state.df_clean = df
-                        st.rerun()
-        
-        with st.expander("🎯 Clean Target Column", expanded=False):
-            st.write(f"Current target: **{target_col}**")
-            st.write(f"Unique values: {df[target_col].unique()}")
-            st.write(f"Value counts:\n{df[target_col].value_counts()}")
-            
-            if st.button("Normalize Target to 0/1"):
-                try:
-                    df = normalize_target(df, target_col)
-                    df = df.dropna(subset=[target_col])
-                    st.session_state.df_clean = df
-                    st.success("✅ Target normalized!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-        
-        with st.expander("🗂️ Remove ID Columns", expanded=False):
-            id_cols = [c for c in df.columns if 'id' in c.lower()]
-            if id_cols:
-                st.write(f"Found ID columns: {id_cols}")
-                if st.button("Remove ID Columns"):
-                    df = df.drop(columns=id_cols)
-                    st.session_state.df_clean = df
-                    st.success(f"✅ Removed {len(id_cols)} ID columns")
-                    st.rerun()
-            else:
-                st.info("No ID columns detected")
-        
-        # Quick clean all button
-        st.subheader("⚡ Quick Actions")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Auto-Clean All", help="Automatically clean: remove IDs, duplicates, normalize target"):
-                try:
-                    with st.spinner("Auto-cleaning..."):
-                        df_clean = clean_data(df, target_col)
-                        st.session_state.df_clean = df_clean
-                        st.session_state.target_col = target_col
-                    st.success("✅ Auto-cleaning complete!")
-                    st.rerun()
-                except ValueError as e:
-                    st.error(f"❌ Error: {str(e)}")
-        
-        with col2:
-            if st.button("↩️ Reset to Original Data"):
-                st.session_state.df_clean = None
-                st.session_state.target_col = None
-                st.info("🔄 Reset to original data")
-                st.rerun()
-        
-        # Show current state
-        st.subheader("📊 Current Data Preview")
-        st.dataframe(df.head(10), width='stretch')
-        
-        # Show target distribution if available
-        if target_col in df.columns:
-            st.subheader("🎯 Target Distribution")
-            try:
-                churn_counts = df[target_col].value_counts().sort_index()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    labels = [str(v) for v in churn_counts.index]
-                    fig = px.pie(
-                        values=churn_counts.values,
-                        names=labels,
-                        title=f"{target_col} Distribution",
-                        color_discrete_sequence=['#667eea', '#764ba2']
-                    )
-                    st.plotly_chart(fig, width='stretch')
-                
-                with col2:
-                    st.write("**Value Counts:**")
-                    for idx, count in churn_counts.items():
-                        st.metric(str(idx), count)
-            except:
-                st.write(df[target_col].value_counts())
-
-# ==================== PAGE 3: DATA VISUALIZATION ====================
+# ==================== PAGE 2: DATA VISUALIZATION ====================
 elif page == "📊 Data Visualization":
     st.header("📊 Data Visualization & Exploratory Analysis")
     
@@ -732,6 +535,203 @@ elif page == "📊 Data Visualization":
         
         # Navigation hint
         st.info("💡 **Next Steps:** Review these insights, go back to Data Cleaning to make adjustments if needed, or proceed to Train Models when ready!")
+
+# ==================== PAGE 3: DATA CLEANING ====================
+elif page == "🧹 Data Cleaning":
+    st.header("🧹 Data Cleaning & Preparation")
+    
+    if st.session_state.df_raw is None:
+        st.warning("⚠️ Please upload a dataset first!")
+    else:
+        # Use cleaned data if available, otherwise start with raw
+        if st.session_state.df_clean is not None:
+            df = st.session_state.df_clean.copy()
+            st.info("📋 Working with previously cleaned data. You can make additional changes below.")
+        else:
+            df = st.session_state.df_raw.copy()
+        
+        st.subheader("⚙️ Target Column Selection")
+        
+        # Target column selection
+        target_col = st.selectbox(
+            "Select Target Column (Churn)",
+            options=df.columns.tolist(),
+            index=df.columns.tolist().index(st.session_state.target_col) if st.session_state.target_col and st.session_state.target_col in df.columns else (len(df.columns)-1 if 'churn' in str(df.columns).lower() else 0)
+        )
+        
+        st.session_state.target_col = target_col
+        
+        # Show current data quality issues
+        st.subheader("🔍 Data Quality Overview")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Rows", len(df))
+        with col2:
+            st.metric("Total Columns", len(df.columns))
+        with col3:
+            st.metric("Missing Values", df.isnull().sum().sum())
+        with col4:
+            st.metric("Duplicate Rows", df.duplicated().sum())
+        
+        # Missing values details
+        missing_df = pd.DataFrame({
+            'Column': df.columns,
+            'Missing Count': df.isnull().sum().values,
+            'Missing %': (df.isnull().sum().values / len(df) * 100).round(2)
+        })
+        missing_df = missing_df[missing_df['Missing Count'] > 0].sort_values('Missing Count', ascending=False)
+        
+        if len(missing_df) > 0:
+            st.subheader("⚠️ Columns with Missing Values")
+            st.dataframe(missing_df, width='stretch')
+        
+        # Granular cleaning options
+        st.subheader("🛠️ Cleaning Operations")
+        
+        with st.expander("🗑️ Remove Duplicate Rows", expanded=False):
+            if df.duplicated().sum() > 0:
+                st.write(f"Found **{df.duplicated().sum()}** duplicate rows")
+                if st.button("Remove Duplicates"):
+                    df = df.drop_duplicates()
+                    st.session_state.df_clean = df
+                    st.success(f"✅ Removed duplicates! Now {len(df)} rows.")
+                    st.rerun()
+            else:
+                st.info("No duplicates found")
+        
+        with st.expander("🔢 Handle Missing Values (Column-by-Column)", expanded=True):
+            if missing_df.empty:
+                st.info("No missing values found!")
+            else:
+                st.write("💡 **Tip:** Different strategies work better for different features. Try different approaches and check visualizations!")
+                
+                cols_with_missing = missing_df['Column'].tolist()
+                selected_col = st.selectbox("Select column to handle", cols_with_missing)
+                
+                if selected_col:
+                    col_data = df[selected_col]
+                    st.write(f"**{selected_col}**: {col_data.isnull().sum()} missing values ({(col_data.isnull().sum()/len(df)*100):.1f}%)")
+                    
+                    # Determine if numeric or categorical
+                    is_numeric = pd.api.types.is_numeric_dtype(col_data)
+                    
+                    if is_numeric:
+                        strategy = st.radio(
+                            f"Strategy for {selected_col}",
+                            ["Keep missing (let model handle)", "Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"],
+                            key=f"strategy_{selected_col}"
+                        )
+                    else:
+                        strategy = st.radio(
+                            f"Strategy for {selected_col}",
+                            ["Keep missing (let model handle)", "Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"],
+                            key=f"strategy_{selected_col}"
+                        )
+                    
+                    if st.button(f"Apply to {selected_col}", type="primary"):
+                        if strategy == "Keep missing (let model handle)":
+                            st.info("✅ Keeping missing values. The model preprocessing will handle them.")
+                        elif strategy == "Fill with Mean":
+                            df[selected_col].fillna(df[selected_col].mean(), inplace=True)
+                            st.success(f"✅ Filled {selected_col} with mean value: {df[selected_col].mean():.2f}")
+                        elif strategy == "Fill with Median":
+                            df[selected_col].fillna(df[selected_col].median(), inplace=True)
+                            st.success(f"✅ Filled {selected_col} with median value: {df[selected_col].median():.2f}")
+                        elif strategy == "Fill with Zero":
+                            df[selected_col].fillna(0, inplace=True)
+                            st.success(f"✅ Filled {selected_col} with zeros")
+                        elif strategy == "Fill with Most Frequent":
+                            most_frequent = df[selected_col].mode()[0]
+                            df[selected_col].fillna(most_frequent, inplace=True)
+                            st.success(f"✅ Filled {selected_col} with most frequent value: {most_frequent}")
+                        elif strategy == "Fill with 'Unknown'":
+                            df[selected_col].fillna('Unknown', inplace=True)
+                            st.success(f"✅ Filled {selected_col} with 'Unknown'")
+                        elif strategy == "Drop rows with missing":
+                            before = len(df)
+                            df = df.dropna(subset=[selected_col])
+                            st.success(f"✅ Dropped {before - len(df)} rows with missing {selected_col}")
+                        
+                        st.session_state.df_clean = df
+                        st.rerun()
+        
+        with st.expander("🎯 Clean Target Column", expanded=False):
+            st.write(f"Current target: **{target_col}**")
+            st.write(f"Unique values: {df[target_col].unique()}")
+            st.write(f"Value counts:\n{df[target_col].value_counts()}")
+            
+            if st.button("Normalize Target to 0/1"):
+                try:
+                    df = normalize_target(df, target_col)
+                    df = df.dropna(subset=[target_col])
+                    st.session_state.df_clean = df
+                    st.success("✅ Target normalized!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+        
+        with st.expander("🗂️ Remove ID Columns", expanded=False):
+            id_cols = [c for c in df.columns if 'id' in c.lower()]
+            if id_cols:
+                st.write(f"Found ID columns: {id_cols}")
+                if st.button("Remove ID Columns"):
+                    df = df.drop(columns=id_cols)
+                    st.session_state.df_clean = df
+                    st.success(f"✅ Removed {len(id_cols)} ID columns")
+                    st.rerun()
+            else:
+                st.info("No ID columns detected")
+        
+        # Quick clean all button
+        st.subheader("⚡ Quick Actions")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔄 Auto-Clean All", help="Automatically clean: remove IDs, duplicates, normalize target"):
+                try:
+                    with st.spinner("Auto-cleaning..."):
+                        df_clean = clean_data(df, target_col)
+                        st.session_state.df_clean = df_clean
+                        st.session_state.target_col = target_col
+                    st.success("✅ Auto-cleaning complete!")
+                    st.rerun()
+                except ValueError as e:
+                    st.error(f"❌ Error: {str(e)}")
+        
+        with col2:
+            if st.button("↩️ Reset to Original Data"):
+                st.session_state.df_clean = None
+                st.session_state.target_col = None
+                st.info("🔄 Reset to original data")
+                st.rerun()
+        
+        # Show current state
+        st.subheader("📊 Current Data Preview")
+        st.dataframe(df.head(10), width='stretch')
+        
+        # Show target distribution if available
+        if target_col in df.columns:
+            st.subheader("🎯 Target Distribution")
+            try:
+                churn_counts = df[target_col].value_counts().sort_index()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    labels = [str(v) for v in churn_counts.index]
+                    fig = px.pie(
+                        values=churn_counts.values,
+                        names=labels,
+                        title=f"{target_col} Distribution",
+                        color_discrete_sequence=['#667eea', '#764ba2']
+                    )
+                    st.plotly_chart(fig, width='stretch')
+                
+                with col2:
+                    st.write("**Value Counts:**")
+                    for idx, count in churn_counts.items():
+                        st.metric(str(idx), count)
+            except:
+                st.write(df[target_col].value_counts())
 
 # ==================== PAGE 4: TRAIN MODELS ====================
 elif page == "🤖 Train Models":
