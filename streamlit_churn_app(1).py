@@ -189,7 +189,7 @@ def train_models(df: pd.DataFrame, target_col: str, test_size: float = 0.2):
     models_def = {
         "Logistic Regression": LogisticRegression(max_iter=1000),
         "Random Forest": RandomForestClassifier(n_estimators=300, random_state=42),
-        "SVM": SVC(kernel="rbf", probability=True, random_state=42)
+        "SVM": SVC(kernel="rbf", probability=True, random_state=42, max_iter=2000)
     }
     
     results = []
@@ -268,7 +268,7 @@ if page == "📤 Upload Data":
             st.metric("Missing Values", df.isnull().sum().sum())
         
         st.subheader("📋 Data Preview")
-        st.dataframe(df.head(10), use_container_width=True)
+        st.dataframe(df.head(10), width='stretch')
         
         st.subheader("📊 Column Information")
         info_df = pd.DataFrame({
@@ -277,7 +277,7 @@ if page == "📤 Upload Data":
             "Non-Null Count": df.count().values,
             "Null Count": df.isnull().sum().values
         })
-        st.dataframe(info_df, use_container_width=True)
+        st.dataframe(info_df, width='stretch')
 
 # ==================== PAGE 2: DATA CLEANING ====================
 elif page == "🧹 Data Cleaning":
@@ -326,7 +326,7 @@ elif page == "🧹 Data Cleaning":
         
         if len(missing_df) > 0:
             st.subheader("⚠️ Columns with Missing Values")
-            st.dataframe(missing_df, use_container_width=True)
+            st.dataframe(missing_df, width='stretch')
         
         # Granular cleaning options
         st.subheader("🛠️ Cleaning Operations")
@@ -450,7 +450,7 @@ elif page == "🧹 Data Cleaning":
         
         # Show current state
         st.subheader("📊 Current Data Preview")
-        st.dataframe(df.head(10), use_container_width=True)
+        st.dataframe(df.head(10), width='stretch')
         
         # Show target distribution if available
         if target_col in df.columns:
@@ -467,7 +467,7 @@ elif page == "🧹 Data Cleaning":
                         title=f"{target_col} Distribution",
                         color_discrete_sequence=['#667eea', '#764ba2']
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                 
                 with col2:
                     st.write("**Value Counts:**")
@@ -526,9 +526,9 @@ elif page == "📊 Data Visualization":
                     color='Percent',
                     color_continuous_scale='Reds'
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             with col2:
-                st.dataframe(missing_data, use_container_width=True)
+                st.dataframe(missing_data, width='stretch')
             
             st.info("💡 **Insight:** Features with >50% missing data might need to be dropped. Features with <5% missing can often be imputed.")
         else:
@@ -556,7 +556,7 @@ elif page == "📊 Data Visualization":
                             color_discrete_sequence=['#667eea'],
                             marginal="box"
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
                         
                         # Stats summary
                         with st.expander(f"📊 Statistics for {col}"):
@@ -571,7 +571,7 @@ elif page == "📊 Data Visualization":
                                     df[col].skew()
                                 ]
                             })
-                            st.dataframe(stats_df, use_container_width=True)
+                            st.dataframe(stats_df, width='stretch')
         
         # Categorical features
         if categorical_cols:
@@ -593,8 +593,8 @@ elif page == "📊 Data Visualization":
                         title=f"Top 15 values in {selected_cat}",
                         color_discrete_sequence=['#764ba2']
                     )
-                    fig.update_xaxis(tickangle=-45)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fig.update_xaxes(tickangle=-45)
+                    st.plotly_chart(fig, width='stretch')
                 
                 with col2:
                     st.metric("Unique Values", unique_count)
@@ -623,7 +623,7 @@ elif page == "📊 Data Visualization":
                 zmin=-1,
                 zmax=1
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             
             # Highlight strong correlations
             with st.expander("🔍 Strong Correlations (>0.7 or <-0.7)"):
@@ -638,7 +638,7 @@ elif page == "📊 Data Visualization":
                             })
                 
                 if strong_corr:
-                    st.dataframe(pd.DataFrame(strong_corr), use_container_width=True)
+                    st.dataframe(pd.DataFrame(strong_corr), width='stretch')
                     st.warning("⚠️ Consider removing one feature from highly correlated pairs")
                 else:
                     st.success("✅ No strong multicollinearity detected")
@@ -666,8 +666,8 @@ elif page == "📊 Data Visualization":
                             color=target_corr.values[:10],
                             color_continuous_scale='Viridis'
                         )
-                        fig.update_xaxis(tickangle=-45)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fig.update_xaxes(tickangle=-45)
+                        st.plotly_chart(fig, width='stretch')
                     
                     with col2:
                         st.write("**Top Correlated Features:**")
@@ -690,7 +690,7 @@ elif page == "📊 Data Visualization":
                         color=target_col,
                         color_discrete_sequence=['#667eea', '#764ba2']
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
         
         # Recommendations section
         st.subheader("💡 Recommendations for Model Training")
@@ -762,7 +762,7 @@ elif page == "🤖 Train Models":
             st.balloons()
             
             st.subheader("📊 Training Results")
-            st.dataframe(results.style.highlight_max(axis=0, color='lightgreen'), use_container_width=True)
+            st.dataframe(results.style.highlight_max(axis=0, color='lightgreen'), width='stretch')
 
 # ==================== PAGE 5: MODEL COMPARISON ====================
 elif page == "📈 Model Comparison":
@@ -794,7 +794,7 @@ elif page == "📈 Model Comparison":
             yaxis_title="Score",
             height=500
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         # Best model
         best_model = results.index[0]
@@ -817,7 +817,7 @@ elif page == "📈 Model Comparison":
                     title=name,
                     color_continuous_scale='Purples'
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
         
         # Deploy to production
         st.subheader("🚀 Deploy Model")
@@ -838,7 +838,7 @@ elif page == "📈 Model Comparison":
                 models_def = {
                     "Logistic Regression": LogisticRegression(max_iter=1000),
                     "Random Forest": RandomForestClassifier(n_estimators=300, random_state=42),
-                    "SVM": SVC(kernel="rbf", probability=True, random_state=42)
+                    "SVM": SVC(kernel="rbf", probability=True, random_state=42, max_iter=2000)
                 }
                 
                 # Create pipeline with selected model and train on FULL dataset
@@ -933,7 +933,7 @@ elif page == "🔮 Make Predictions":
                     }
                 ))
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
         
         else:  # Batch Prediction
             st.subheader("📁 Upload CSV File for Batch Predictions")
@@ -949,7 +949,7 @@ elif page == "🔮 Make Predictions":
                 batch_df = pd.read_csv(batch_file)
                 
                 st.success(f"✅ File loaded: {len(batch_df)} customers")
-                st.dataframe(batch_df.head(), use_container_width=True)
+                st.dataframe(batch_df.head(), width='stretch')
                 
                 if st.button("🎯 Predict All", type="primary"):
                     try:
@@ -997,13 +997,13 @@ elif page == "🔮 Make Predictions":
                             title="Customer Risk Distribution",
                             color_discrete_sequence=['#667eea', '#FFA500', '#764ba2']
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
                         
                         # Results table
                         st.subheader("📋 Prediction Results")
                         st.dataframe(
                             result_df.sort_values('Churn_Probability', ascending=False),
-                            use_container_width=True
+                            width='stretch'
                         )
                         
                         # Download results
