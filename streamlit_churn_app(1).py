@@ -268,7 +268,7 @@ if page == "📤 Upload Data":
             st.metric("Missing Values", df.isnull().sum().sum())
         
         st.subheader("📋 Data Preview")
-        st.dataframe(df.head(10), use_container_width=True)
+        st.dataframe(df.head(10), width='stretch')
         
         st.subheader("📊 Column Information")
         info_df = pd.DataFrame({
@@ -277,7 +277,7 @@ if page == "📤 Upload Data":
             "Non-Null Count": df.count().values,
             "Null Count": df.isnull().sum().values
         })
-        st.dataframe(info_df, use_container_width=True)
+        st.dataframe(info_df, width='stretch')
 
 # ==================== PAGE 2: DATA VISUALIZATION ====================
 elif page == "📊 Data Visualization":
@@ -329,9 +329,9 @@ elif page == "📊 Data Visualization":
                     color='Percent',
                     color_continuous_scale='Reds'
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             with col2:
-                st.dataframe(missing_data, use_container_width=True)
+                st.dataframe(missing_data, width='stretch')
             
             st.info("💡 **Insight:** Features with >50% missing data might need to be dropped. Features with <5% missing can often be imputed.")
         else:
@@ -359,7 +359,7 @@ elif page == "📊 Data Visualization":
                             color_discrete_sequence=['#667eea'],
                             marginal="box"
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
                         
                         # Stats summary
                         with st.expander(f"📊 Statistics for {col}"):
@@ -374,7 +374,7 @@ elif page == "📊 Data Visualization":
                                     df[col].skew()
                                 ]
                             })
-                            st.dataframe(stats_df, use_container_width=True)
+                            st.dataframe(stats_df, width='stretch')
         
         # Categorical features
         if categorical_cols:
@@ -397,7 +397,7 @@ elif page == "📊 Data Visualization":
                         color_discrete_sequence=['#764ba2']
                     )
                     fig.update_xaxes(tickangle=-45)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                 
                 with col2:
                     st.metric("Unique Values", unique_count)
@@ -426,7 +426,7 @@ elif page == "📊 Data Visualization":
                 zmin=-1,
                 zmax=1
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             
             # Highlight strong correlations
             with st.expander("🔍 Strong Correlations (>0.7 or <-0.7)"):
@@ -441,7 +441,7 @@ elif page == "📊 Data Visualization":
                             })
                 
                 if strong_corr:
-                    st.dataframe(pd.DataFrame(strong_corr), use_container_width=True)
+                    st.dataframe(pd.DataFrame(strong_corr), width='stretch')
                     st.warning("⚠️ Consider removing one feature from highly correlated pairs")
                 else:
                     st.success("✅ No strong multicollinearity detected")
@@ -470,7 +470,7 @@ elif page == "📊 Data Visualization":
                             color_continuous_scale='Viridis'
                         )
                         fig.update_xaxes(tickangle=-45)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
                     
                     with col2:
                         st.write("**Top Correlated Features:**")
@@ -493,7 +493,7 @@ elif page == "📊 Data Visualization":
                         color=target_col,
                         color_discrete_sequence=['#667eea', '#764ba2']
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
         
         # Recommendations section
         st.subheader("💡 Recommendations for Model Training")
@@ -583,7 +583,7 @@ elif page == "🧹 Data Cleaning":
         
         if len(missing_df) > 0:
             st.subheader("⚠️ Columns with Missing Values")
-            st.dataframe(missing_df, use_container_width=True)
+            st.dataframe(missing_df, width='stretch')
         
         # Granular cleaning options
         st.subheader("🛠️ Cleaning Operations")
@@ -674,4 +674,6 @@ elif page == "🧹 Data Cleaning":
             st.write("💡 **Tip:** Remove columns that won't help prediction (IDs, names, dates, high-cardinality features)")
             
             # Auto-detect potential columns to remove
-            potential
+            potential_remove = []
+            for col in df.columns:
+                if col == target_col
