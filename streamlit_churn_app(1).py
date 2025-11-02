@@ -588,16 +588,44 @@ elif page == "🧹 Data Cleaning":
         # Granular cleaning options
         st.subheader("🛠️ Cleaning Operations")
         
-        with st.expander("🗑️ Remove Duplicate Rows", expanded=False):
-            if df.duplicated().sum() > 0:
-                st.write(f"Found **{df.duplicated().sum()}** duplicate rows")
-                if st.button("Remove Duplicates"):
-                    df = df.drop_duplicates()
+        with st.expander("🗑️ Remove Unwanted Columns", expanded=False):
+            st.write("Remove columns that won't help prediction like IDs, names, dates, or high-cardinality features")
+            
+            # Auto-detect potential columns to remove
+            potential_remove = []
+            for col in df.columns:
+                if col == target_col:
+                    continue
+                # Check for ID-like columns
+                if 'id' in col.lower() or col.lower().endswith('_id') or col.lower().startswith('id_'):
+                    potential_remove.append((col, "ID column"))
+                # Check for high cardinality
+                elif df[col].nunique() > len(df) * 0.95:
+                    potential_remove.append((col, f"Very high cardinality ({df[col].nunique()} unique)"))
+                # Check for columns with mostly unique values
+                elif df[col].dtype == 'object' and df[col].nunique() > len(df) * 0.5:
+                    potential_remove.append((col, f"High cardinality ({df[col].nunique()} unique)"))
+            
+            if potential_remove:
+                st.write("**Suggested columns to remove:**")
+                for col, reason in potential_remove:
+                    st.write(f"- `{col}`: {reason}")
+            
+            # Let user select columns to remove
+            cols_to_remove = st.multiselect(
+                "Select columns to remove",
+                [c for c in df.columns if c != target_col],
+                default=[col for col, _ in potential_remove]
+            )
+            
+            if cols_to_remove:
+                if st.button("Remove Selected Columns"):
+                    df = df.drop(columns=cols_to_remove)
                     st.session_state.df_clean = df
-                    st.success(f"✅ Removed duplicates! Now {len(df)} rows.")
+                    st.success(f"✅ Removed {len(cols_to_remove)} columns")
                     st.rerun()
             else:
-                st.info("No duplicates found")
+                st.info("No columns selected for removal")
         
         with st.expander("🔢 Handle Missing Values (Column-by-Column)", expanded=True):
             if missing_df.empty:
