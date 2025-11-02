@@ -79,6 +79,13 @@ if 'feature_schema' not in st.session_state:
     st.session_state.feature_schema = None
 if 'target_col' not in st.session_state:
     st.session_state.target_col = None
+# --- NEW: Global Imputation Strategies ---
+if 'num_impute_strategy' not in st.session_state:
+    st.session_state.num_impute_strategy = "median" # Default for numeric
+if 'cat_impute_strategy' not in st.session_state:
+    st.session_state.cat_impute_strategy = "most_frequent" # Default for categorical
+# ----------------------------------------
+
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -136,21 +143,42 @@ def clean_data(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     return df
 
 def build_preprocessor(df: pd.DataFrame, target_col: str):
-    """Build preprocessing pipeline"""
+    """
+    Build preprocessing pipeline using user-defined global imputation strategies.
+    """
     feature_cols = [c for c in df.columns if c != target_col]
     X = df[feature_cols]
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = [c for c in feature_cols if c not in num_cols]
     
-    num_pipe = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler())
-    ])
+    # --- MODIFIED: Use Session State for Strategy ---
+    num_strategy = st.session_state.get('num_impute_strategy', 'median')
+    cat_strategy = st.session_state.get('cat_impute_strategy', 'most_frequent')
+
+    # Handle 'zero' strategy for SimpleImputer (requires 'constant', fill_value=0)
+    if num_strategy == 'zero':
+        num_pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="constant", fill_value=0)),
+            ("scaler", StandardScaler())
+        ])
+    else: # mean or median
+        num_pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy=num_strategy)),
+            ("scaler", StandardScaler())
+        ])
     
-    cat_pipe = Pipeline([
-        ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
-    ])
+    # Handle 'unknown' strategy for SimpleImputer (requires 'constant', fill_value="Unknown")
+    if cat_strategy == 'unknown':
+        cat_pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
+            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
+        ])
+    else: # most_frequent
+        cat_pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy=cat_strategy)),
+            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
+        ])
+    # ------------------------------------------------
     
     preprocessor = ColumnTransformer([
         ("num", num_pipe, num_cols),
@@ -181,6 +209,7 @@ def train_models(df: pd.DataFrame, target_col: str, test_size: float = 0.2):
         st.error(f"❌ Only found class {y.unique()[0]} in the data. Cannot train models.")
         st.stop()
     
+    # Build preprocessor using current global settings
     preprocessor, schema = build_preprocessor(df, target_col)
     
     X_train, X_test, y_train, y_test = train_test_split(
@@ -562,6 +591,46 @@ elif page == "🧹 Data Cleaning":
         
         st.session_state.target_col = target_col
         
+        # --- NEW SECTION: Global Imputation Settings for Pipeline ---
+        st.subheader("⚙️ Global Imputation Strategy (for Model Training Pipeline)")
+        st.write("These strategies define how missing values are handled by the preprocessor **during model training and prediction**.")
+
+        col_num, col_cat = st.columns(2)
+
+        with col_num:
+            num_strategy_map = {
+                "Median (Default)": "median", 
+                "Mean": "mean", 
+                "Zero": "zero"
+            }
+            
+            selected_num_name = st.selectbox(
+                "Numeric Imputation Strategy:",
+                list(num_strategy_map.keys()),
+                index=list(num_strategy_map.values()).index(st.session_state.num_impute_strategy),
+                key="global_num_impute",
+                help="How to fill missing numeric values in the machine learning pipeline."
+            )
+            st.session_state.num_impute_strategy = num_strategy_map[selected_num_name]
+
+        with col_cat:
+            cat_strategy_map = {
+                "Most Frequent (Default)": "most_frequent", 
+                "Constant ('Unknown')": "unknown"
+            }
+            
+            selected_cat_name = st.selectbox(
+                "Categorical Imputation Strategy:",
+                list(cat_strategy_map.keys()),
+                index=list(cat_strategy_map.values()).index(st.session_state.cat_impute_strategy),
+                key="global_cat_impute",
+                help="How to fill missing categorical values in the machine learning pipeline."
+            )
+            st.session_state.cat_impute_strategy = cat_strategy_map[selected_cat_name]
+        
+        st.markdown("---")
+        # -------------------------------------------------------------------------
+        
         # Show current data quality issues
         st.subheader("🔍 Data Quality Overview")
         col1, col2, col3, col4 = st.columns(4)
@@ -587,7 +656,7 @@ elif page == "🧹 Data Cleaning":
             st.dataframe(missing_df, width='stretch')
         
         # Granular cleaning options
-        st.subheader("🛠️ Cleaning Operations")
+        st.subheader("🛠️ Cleaning Operations (Manual Edits)")
         
         with st.expander("🗑️ Remove Duplicate Rows", expanded=False):
             if df.duplicated().sum() > 0:
@@ -600,11 +669,11 @@ elif page == "🧹 Data Cleaning":
             else:
                 st.info("No duplicates found")
         
-        with st.expander("🔢 Handle Missing Values (Column-by-Column)", expanded=True):
+        with st.expander("🔢 Handle Missing Values (Column-by-Column)", expanded=False): # Changed to False to prioritize global settings view
             if missing_df.empty:
                 st.info("No missing values found!")
             else:
-                st.write("💡 **Tip:** Different strategies work better for different features. Try different approaches and check visualizations!")
+                st.write("💡 **Tip:** Use this for features that need custom, *pre-pipeline* imputation (e.g., filling a specific column with a custom value). Otherwise, use the Global Settings above.")
                 
                 cols_with_missing = missing_df['Column'].tolist()
                 selected_col = st.selectbox("Select column to handle", cols_with_missing)
@@ -671,9 +740,7 @@ elif page == "🧹 Data Cleaning":
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
         
-        # =========================================================================
-        # MODIFIED SECTION: Remove Unwanted Columns (Replaces Remove ID Columns)
-        # =========================================================================
+        # MODIFIED SECTION: Remove Unwanted Columns
         with st.expander("🗂️ Remove Unwanted Columns", expanded=False):
             st.write("Select columns to permanently remove from the dataset (e.g., ID columns, metadata, highly redundant features).")
             
@@ -704,9 +771,7 @@ elif page == "🧹 Data Cleaning":
                         st.rerun()
             else:
                 st.info("No columns selected for removal.")
-        # =========================================================================
         # END OF MODIFIED SECTION
-        # =========================================================================
         
         # Quick clean all button
         st.subheader("⚡ Quick Actions")
@@ -768,6 +833,9 @@ elif page == "🤖 Train Models":
     else:
         df_clean = st.session_state.df_clean
         target_col = st.session_state.target_col
+        
+        # Display current imputation settings
+        st.info(f"💡 **Current Pipeline Settings:** Numeric Missing Values are imputed with **{st.session_state.num_impute_strategy.capitalize()}**; Categorical with **{st.session_state.cat_impute_strategy.replace('_', ' ').title()}**.")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -858,7 +926,7 @@ elif page == "📈 Model Comparison":
                 y = df_clean[target_col].astype(int)
                 X = df_clean.drop(columns=[target_col])
                 
-                # Rebuild preprocessor and get model
+                # Rebuild preprocessor using current global settings and get model
                 preprocessor, schema = build_preprocessor(df_clean, target_col)
                 
                 models_def = {
@@ -1007,7 +1075,7 @@ elif page == "🔮 Make Predictions":
                                 probabilities,
                                 bins=[0, 0.33, 0.66, 1.0],
                                 labels=['Low', 'Medium', 'High'],
-                                include_lowest=True # Added include_lowest for completeness
+                                include_lowest=True
                             )
                         
                         st.success("✅ Predictions completed!")
