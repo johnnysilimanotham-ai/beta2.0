@@ -291,7 +291,7 @@ if page == "📤 Upload Data":
             default_index = len(column_names) - 1 # Fallback to last column
             
         selected_target = st.selectbox(
-            "Which column represents customer churn (The variable you want to predict)?",
+            "Select which variable you would like to predict.",
             options=column_names,
             index=default_index,
             key="upload_target_select"
