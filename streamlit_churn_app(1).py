@@ -64,7 +64,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== SESSION STATE ====================
+# ==================== SESSION STATE (UPDATED) ====================
 if 'df_raw' not in st.session_state:
     st.session_state.df_raw = None
 if 'df_clean' not in st.session_state:
@@ -79,8 +79,13 @@ if 'feature_schema' not in st.session_state:
     st.session_state.feature_schema = None
 if 'target_col' not in st.session_state:
     st.session_state.target_col = None
+# --- NEW: Cleaning Configuration ---
+if 'imputation_strategies' not in st.session_state:
+    st.session_state.imputation_strategies = {}
+if 'columns_to_drop' not in st.session_state:
+    st.session_state.columns_to_drop = []
 
-# ==================== HELPER FUNCTIONS ====================
+# ==================== HELPER FUNCTIONS (UPDATED) ====================
 
 def normalize_target(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     """Normalize target to 0/1 format"""
@@ -110,13 +115,15 @@ def normalize_target(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     return df
 
 def clean_data(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
-    """Clean and prepare data"""
+    """
+    DEPRECATED: Quick clean and prepare data (Used for Auto-Clean fallback)
+    Performs basic cleaning: drops IDs, drops duplicates, normalizes and drops rows with missing target.
+    """
     df = df.copy()
     
     # Drop ID columns first (retaining the quick clean version logic)
     id_cols = [c for c in df.columns if 'id' in c.lower() and c != target_col]
     if id_cols:
-        # Robustness fix: use errors='ignore' in case a detected ID column was already dropped
         df = df.drop(columns=id_cols, errors='ignore') 
     
     # Normalize target column
@@ -135,7 +142,86 @@ def clean_data(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     
     return df
 
+def apply_custom_cleaning(df: pd.DataFrame, target_col: str, drop_cols: list, impute_strategies: dict) -> pd.DataFrame:
+    """Apply all saved custom cleaning instructions."""
+    df_clean = df.copy()
+    
+    # 1. Drop Unwanted Columns
+    cols_to_drop = [col for col in drop_cols if col in df_clean.columns and col != target_col]
+    if cols_to_drop:
+        df_clean = df_clean.drop(columns=cols_to_drop, errors='ignore')
+        st.write(f"✅ Dropped {len(cols_to_drop)} columns.")
+
+    # 2. Handle Duplicates
+    initial_rows = len(df_clean)
+    df_clean = df_clean.drop_duplicates()
+    if initial_rows != len(df_clean):
+        st.write(f"✅ Removed {initial_rows - len(df_clean)} duplicate rows. Now {len(df_clean)} rows.")
+    else:
+        st.write("✅ No duplicates found or removed.")
+
+
+    # 3. Normalize Target and Drop Rows with Missing Target
+    target_missing_before = df_clean[target_col].isnull().sum() if target_col in df_clean.columns else 0
+    try:
+        df_clean = normalize_target(df_clean, target_col)
+        df_clean = df_clean.dropna(subset=[target_col])
+        target_missing_after = df_clean[target_col].isnull().sum()
+        if target_missing_before > 0:
+            st.write("✅ Target normalized to 0/1 and rows with missing target dropped.")
+        else:
+             st.write("✅ Target column normalized.")
+    except Exception as e:
+         st.error(f"Target Cleaning Error: {str(e)}")
+         st.stop()
+
+
+    # 4. Handle Missing Values based on strategy
+    st.write("---")
+    st.write("### Applying Missing Value Strategies:")
+    for col, strategy in impute_strategies.items():
+        # Check if column still exists after dropping, and if it has missing values
+        if col in df_clean.columns and df_clean[col].isnull().any():
+            missing_count = df_clean[col].isnull().sum()
+            
+            if strategy == "Drop rows with missing":
+                df_clean = df_clean.dropna(subset=[col])
+                st.write(f"🗑️ Dropped {missing_count} rows due to missing **{col}**.")
+            elif strategy == "Fill with Mean":
+                df_clean[col].fillna(df_clean[col].mean(), inplace=True)
+                st.write(f"🔢 Filled **{col}** with Mean.")
+            elif strategy == "Fill with Median":
+                df_clean[col].fillna(df_clean[col].median(), inplace=True)
+                st.write(f"🔢 Filled **{col}** with Median.")
+            elif strategy == "Fill with Zero":
+                df_clean[col].fillna(0, inplace=True)
+                st.write(f"🔢 Filled **{col}** with Zero.")
+            elif strategy == "Fill with Most Frequent":
+                try:
+                    most_frequent = df_clean[col].mode()[0]
+                    df_clean[col].fillna(most_frequent, inplace=True)
+                    st.write(f"🔠 Filled **{col}** with Most Frequent ({most_frequent}).")
+                except IndexError:
+                    st.warning(f"⚠️ Could not find mode for **{col}**, skipping imputation.")
+            elif strategy == "Fill with 'Unknown'":
+                df_clean[col].fillna('Unknown', inplace=True)
+                st.write(f"🔠 Filled **{col}** with 'Unknown'.")
+            elif strategy == "Keep missing (let model handle)":
+                st.write(f"⏭️ Skipping **{col}** - missing values will be handled by the ML preprocessing pipeline.")
+            else:
+                 st.write(f"⚠️ **{col}**: Unknown strategy '{strategy}' skipped.")
+        elif col in df_clean.columns:
+            st.write(f"✅ **{col}** has no missing values.")
+    
+    # Final check for two classes
+    unique_classes = df_clean[target_col].unique()
+    if len(unique_classes) < 2:
+        raise ValueError(f"Target column must have at least 2 classes. Found only: {unique_classes}")
+    
+    return df_clean
+
 def build_preprocessor(df: pd.DataFrame, target_col: str):
+# ... (rest of the function remains the same)
     """Build preprocessing pipeline"""
     feature_cols = [c for c in df.columns if c != target_col]
     X = df[feature_cols]
@@ -166,6 +252,7 @@ def build_preprocessor(df: pd.DataFrame, target_col: str):
     return preprocessor, schema
 
 def train_models(df: pd.DataFrame, target_col: str, test_size: float = 0.2):
+# ... (rest of the function remains the same)
     """Train all models and return results"""
     df = df.copy()
     
@@ -248,7 +335,7 @@ page = st.sidebar.selectbox(
     ["📤 Upload Data", "📊 Data Visualization", "🧹 Data Cleaning", "🤖 Train Models", "📈 Model Comparison", "🔮 Make Predictions"]
 )
 
-# ==================== PAGE 1: UPLOAD DATA (UPDATED) ====================
+# ==================== PAGE 1: UPLOAD DATA (UNMODIFIED) ====================
 if page == "📤 Upload Data":
     st.header("📤 Upload Your Dataset")
     
@@ -273,12 +360,12 @@ if page == "📤 Upload Data":
             st.metric("Missing Values", df.isnull().sum().sum())
         
         # ------------------------------------------------------------------
-        # NEW/MOVED SECTION: Target Column Selection
+        # Target Column Selection
         st.subheader("🎯 Select Target Variable")
         
         # Calculate a sensible default index
-        default_index = 0
         column_names = df.columns.tolist()
+        default_index = len(column_names) - 1 # Fallback to last column
         if st.session_state.target_col and st.session_state.target_col in column_names:
             default_index = column_names.index(st.session_state.target_col)
         elif 'churn' in str(column_names).lower():
@@ -286,9 +373,7 @@ if page == "📤 Upload Data":
                 # Find the first column containing 'churn' (case-insensitive)
                 default_index = next(i for i, col in enumerate(column_names) if 'churn' in col.lower())
             except StopIteration:
-                default_index = len(column_names) - 1
-        elif len(column_names) > 0:
-            default_index = len(column_names) - 1 # Fallback to last column
+                pass
             
         selected_target = st.selectbox(
             "Which column represents customer churn (The variable you want to predict)?",
@@ -304,6 +389,9 @@ if page == "📤 Upload Data":
             st.session_state.df_clean = None
             st.session_state.results = None
             st.session_state.production_model = None
+            # Also reset cleaning instructions if data/target changes
+            st.session_state.imputation_strategies = {}
+            st.session_state.columns_to_drop = []
             st.warning("Target column changed. Please re-run cleaning and training steps.")
         
         st.info(f"Target column set to: **{st.session_state.target_col}**")
@@ -321,7 +409,7 @@ if page == "📤 Upload Data":
         })
         st.dataframe(info_df, width='stretch')
 
-# ==================== PAGE 2: DATA VISUALIZATION ====================
+# ==================== PAGE 2: DATA VISUALIZATION (UNMODIFIED) ====================
 elif page == "📊 Data Visualization":
     st.header("📊 Data Visualization & Exploratory Analysis")
     
@@ -605,13 +693,10 @@ elif page == "🧹 Data Cleaning":
         
     target_col = st.session_state.target_col
     
-    # Use cleaned data if available, otherwise start with raw
-    if st.session_state.df_clean is not None:
-        df = st.session_state.df_clean.copy()
-        st.info(f"📋 Working with previously cleaned data. You can make additional changes below. Target: **{target_col}**")
-    else:
-        df = st.session_state.df_raw.copy()
-        st.info(f"📋 Starting with raw data. Target: **{target_col}**")
+    # Use raw data for configuration, the cleaning will be applied on button click
+    df = st.session_state.df_raw.copy()
+    
+    st.info(f"📋 Configuring cleaning steps for **Raw Data** with {len(df)} rows. Target: **{target_col}**")
 
     # Display Target Column (No longer a selectbox, just a display)
     st.subheader("⚙️ Target Column (Set on Upload Page)")
@@ -622,7 +707,7 @@ elif page == "🧹 Data Cleaning":
         st.stop()
     
     # Show current data quality issues
-    st.subheader("🔍 Data Quality Overview")
+    st.subheader("🔍 Raw Data Quality Overview")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Rows", len(df))
@@ -636,7 +721,6 @@ elif page == "🧹 Data Cleaning":
     # Missing values details
     missing_df = pd.DataFrame({
         'Column': df.columns,
-        'Type': df.dtypes.astype(str),
         'Missing Count': df.isnull().sum().values,
         'Missing %': (df.isnull().sum().values / len(df) * 100).round(2)
     })
@@ -644,202 +728,130 @@ elif page == "🧹 Data Cleaning":
     
     if len(missing_df) > 0:
         st.subheader("⚠️ Columns with Missing Values")
-        st.dataframe(missing_df.set_index('Column'), width='stretch')
+        st.dataframe(missing_df, width='stretch')
     
     # Granular cleaning options
-    st.subheader("🛠️ Cleaning Operations")
+    st.subheader("🛠️ Configure Cleaning Operations")
     
-    with st.expander("🗑️ Remove Duplicate Rows", expanded=False):
-        if df.duplicated().sum() > 0:
-            st.write(f"Found **{df.duplicated().sum()}** duplicate rows")
-            if st.button("Remove Duplicates"):
-                df = df.drop_duplicates()
-                st.session_state.df_clean = df
-                st.success(f"✅ Removed duplicates! Now {len(df)} rows.")
-                st.rerun()
-        else:
-            st.info("No duplicates found")
-    
-    # --- MODIFIED: Handle Missing Values ---
-    with st.expander("🔢 Handle Missing Values (Bulk Imputation)", expanded=True):
-        if missing_df.empty:
-            st.info("No missing values found in the current dataset!")
-        else:
-            st.write("💡 **Tip:** Apply a single imputation strategy to multiple numeric or categorical features at once.")
-            
-            cols_with_missing = missing_df.index.tolist()
-            
-            # --- Numeric Imputation ---
-            numeric_cols_with_missing = missing_df[missing_df['Type'].str.contains('float|int')].index.tolist()
-            if numeric_cols_with_missing:
-                st.markdown("##### Numeric Features Imputation")
-                
-                selected_num_cols = st.multiselect(
-                    "Select numeric columns to impute:",
-                    options=numeric_cols_with_missing,
-                    key="select_num_impute"
-                )
-                
-                num_strategy = st.radio(
-                    "Numeric Imputation Strategy:",
-                    ["Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"],
-                    key="num_strategy_radio"
-                )
-                
-                if st.button("Apply Numeric Imputation", type="secondary"):
-                    if not selected_num_cols:
-                        st.warning("Please select at least one numeric column.")
-                    else:
-                        before = len(df)
-                        for col in selected_num_cols:
-                            if num_strategy == "Fill with Mean":
-                                fill_value = df[col].mean()
-                                df[col].fillna(fill_value, inplace=True)
-                                st.success(f"✅ Filled **{col}** with mean value: {fill_value:.2f}")
-                            elif num_strategy == "Fill with Median":
-                                fill_value = df[col].median()
-                                df[col].fillna(fill_value, inplace=True)
-                                st.success(f"✅ Filled **{col}** with median value: {fill_value:.2f}")
-                            elif num_strategy == "Fill with Zero":
-                                df[col].fillna(0, inplace=True)
-                                st.success(f"✅ Filled **{col}** with zeros")
-                            elif num_strategy == "Drop rows with missing":
-                                pass # Handled outside the loop for accurate row count
-                        
-                        if num_strategy == "Drop rows with missing":
-                            df = df.dropna(subset=selected_num_cols)
-                            st.success(f"✅ Dropped **{before - len(df)}** rows with missing values in the selected numeric columns.")
-
-                        st.session_state.df_clean = df
-                        st.rerun()
-            
-            # --- Categorical Imputation ---
-            cat_cols_with_missing = missing_df[missing_df['Type'].str.contains('object|category|bool')].index.tolist()
-            if cat_cols_with_missing:
-                st.markdown("---")
-                st.markdown("##### Categorical Features Imputation")
-                
-                selected_cat_cols = st.multiselect(
-                    "Select categorical columns to impute:",
-                    options=cat_cols_with_missing,
-                    key="select_cat_impute"
-                )
-                
-                cat_strategy = st.radio(
-                    "Categorical Imputation Strategy:",
-                    ["Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"],
-                    key="cat_strategy_radio"
-                )
-                
-                if st.button("Apply Categorical Imputation", type="secondary"):
-                    if not selected_cat_cols:
-                        st.warning("Please select at least one categorical column.")
-                    else:
-                        before = len(df)
-                        for col in selected_cat_cols:
-                            if cat_strategy == "Fill with Most Frequent":
-                                most_frequent = df[col].mode()[0]
-                                df[col].fillna(most_frequent, inplace=True)
-                                st.success(f"✅ Filled **{col}** with most frequent value: {most_frequent}")
-                            elif cat_strategy == "Fill with 'Unknown'":
-                                df[col].fillna('Unknown', inplace=True)
-                                st.success(f"✅ Filled **{col}** with 'Unknown'")
-                            elif cat_strategy == "Drop rows with missing":
-                                pass # Handled outside the loop for accurate row count
-
-                        if cat_strategy == "Drop rows with missing":
-                            df = df.dropna(subset=selected_cat_cols)
-                            st.success(f"✅ Dropped **{before - len(df)}** rows with missing values in the selected categorical columns.")
-
-                        st.session_state.df_clean = df
-                        st.rerun()
-            
-            if not numeric_cols_with_missing and not cat_cols_with_missing:
-                 st.info("No more missing values to handle based on feature type.")
-    # --- END OF MODIFIED: Handle Missing Values ---
-    
-    with st.expander("🎯 Clean Target Column", expanded=False):
-        st.write(f"Current target: **{target_col}**")
-        if target_col in df.columns:
-            st.write(f"Unique values: {df[target_col].unique()}")
-            st.write(f"Value counts:\n{df[target_col].value_counts()}")
-        
-        if st.button("Normalize Target to 0/1"):
-            try:
-                df = normalize_target(df, target_col)
-                df = df.dropna(subset=[target_col])
-                st.session_state.df_clean = df
-                st.success("✅ Target normalized and rows with missing target dropped!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
-    
-    # MODIFIED SECTION: Remove Unwanted Columns
-    with st.expander("🗂️ Remove Unwanted Columns", expanded=False):
+    # --- 1. REMOVE UNWANTED COLUMNS ---
+    with st.expander("🗂️ Select Columns to Remove", expanded=True):
         st.write("Select columns to permanently remove from the dataset (e.g., ID columns, metadata, highly redundant features).")
         
-        # Allow user to select any columns to drop
-        # Exclude the current target column from the selection options
         column_options = [col for col in df.columns if col != target_col]
-        
-        columns_to_drop = st.multiselect(
-            "Select columns to drop:",
-            options=column_options,
-            default=[]
-        )
         
         # Auto-detect initial suggestions based on 'id' keyword
         suggested_id_cols = [c for c in df.columns if 'id' in c.lower() and c != target_col]
+        
+        # Default the multiselect to the current session state list (or suggested IDs if first time)
+        initial_drop_selection = st.session_state.columns_to_drop if st.session_state.columns_to_drop else suggested_id_cols
+        
+        columns_to_drop_new = st.multiselect(
+            "Select columns to drop (will be applied on 'Apply' button click):",
+            options=column_options,
+            default=initial_drop_selection
+        )
+        
+        # Save the new list to session state immediately on change
+        st.session_state.columns_to_drop = columns_to_drop_new
+        
         if suggested_id_cols:
              st.info(f"💡 **Suggested ID columns:** {', '.join(suggested_id_cols)}")
 
-        if columns_to_drop:
-            if st.button("Remove Selected Columns"):
-                # Check if any selected column is the target column before dropping (robustness)
-                if target_col in columns_to_drop:
-                     st.error(f"❌ Cannot remove the target column: **{target_col}**.")
-                else:
-                    df = df.drop(columns=columns_to_drop)
-                    st.session_state.df_clean = df
-                    st.success(f"✅ Removed {len(columns_to_drop)} columns: {', '.join(columns_to_drop)}")
-                    st.rerun()
+        st.success(f"Columns selected for removal: **{len(columns_to_drop_new)}**")
+
+    # --- 2. HANDLE MISSING VALUES ---
+    with st.expander("🔢 Define Missing Value Imputation Strategies", expanded=True):
+        if missing_df.empty:
+            st.info("No missing values found in the raw data!")
         else:
-            st.info("No columns selected for removal.")
-    # END OF MODIFIED SECTION
-    
-    # Quick clean all button
-    st.subheader("⚡ Quick Actions")
+            st.write("💡 **Define imputation strategies for columns with missing data.** (These will apply on 'Apply' button click.)")
+            
+            cols_with_missing = missing_df['Column'].tolist()
+            
+            with st.form("imputation_form"):
+                st.write("### Set Strategy per Column")
+                
+                for col in cols_with_missing:
+                    # Determine if numeric or categorical
+                    is_numeric = pd.api.types.is_numeric_dtype(df[col])
+                    
+                    if is_numeric:
+                        options = ["Keep missing (let model handle)", "Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"]
+                        default_strategy = "Fill with Median"
+                    else:
+                        options = ["Keep missing (let model handle)", "Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"]
+                        default_strategy = "Fill with Most Frequent"
+                    
+                    # Get current setting from session state or use default
+                    current_strategy = st.session_state.imputation_strategies.get(col, default_strategy)
+                    
+                    # Ensure the current strategy is in the options list (in case a column type changes)
+                    if current_strategy not in options:
+                        current_strategy = default_strategy
+                    
+                    # Create a selectbox for each column
+                    new_strategy = st.selectbox(
+                        f"**{col}** ({missing_df[missing_df['Column'] == col]['Missing %'].iloc[0]:.1f}% missing)",
+                        options,
+                        index=options.index(current_strategy),
+                        key=f"impute_strategy_{col}"
+                    )
+                    
+                    # Update session state for the specific column
+                    st.session_state.imputation_strategies[col] = new_strategy
+                
+                submitted = st.form_submit_button("Save Imputation Strategies")
+                if submitted:
+                     st.success("✅ Imputation strategies saved! Click 'Apply All Cleaning' to process the data.")
+        
+    # --- 3. QUICK ACTIONS (Application) ---
+    st.subheader("⚡ Quick Actions (Apply or Reset)")
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("🔄 Auto-Clean All", help="Automatically clean: remove IDs, duplicates, normalize target"):
+        if st.button("🚀 Apply All Custom Cleaning", type="primary", help="Applies all saved instructions (Drop Columns, Duplicates, Target Normalize, and Imputations)"):
             try:
-                with st.spinner("Auto-cleaning..."):
-                    df_clean = clean_data(df, target_col)
+                with st.spinner("Applying custom cleaning..."):
+                    # Use the new comprehensive cleaning function
+                    df_clean = apply_custom_cleaning(
+                        st.session_state.df_raw.copy(), 
+                        target_col, 
+                        st.session_state.columns_to_drop, 
+                        st.session_state.imputation_strategies
+                    )
+                    
                     st.session_state.df_clean = df_clean
                     st.session_state.target_col = target_col
-                st.success("✅ Auto-cleaning complete!")
+                
+                st.success("✅ Custom cleaning complete! Review the final data below.")
                 st.rerun()
             except ValueError as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.error(f"❌ Cleaning Error: {str(e)}")
+                st.warning("Please check your target column and ensure it has two classes.")
+            except Exception as e:
+                 st.error(f"❌ An unexpected error occurred during cleaning: {str(e)}")
     
     with col2:
         if st.button("↩️ Reset to Original Data"):
             st.session_state.df_clean = None
-            # Target is kept as it was set on the upload page
-            st.info("🔄 Reset to original raw data")
+            st.session_state.imputation_strategies = {}
+            st.session_state.columns_to_drop = []
+            st.info("🔄 Reset to original raw data and cleared cleaning configurations.")
             st.rerun()
     
-    # Show current state
-    st.subheader("📊 Current Data Preview")
-    st.dataframe(df.head(10), width='stretch')
+    # Show current state (either clean or raw data)
+    st.subheader("📊 Final Data Preview")
+    
+    df_display = st.session_state.df_clean if st.session_state.df_clean is not None else st.session_state.df_raw
+    st.info(f"Currently displaying {'Cleaned Data' if st.session_state.df_clean is not None else 'Raw Data'}: {len(df_display)} rows.")
+    st.dataframe(df_display.head(10), width='stretch')
     
     # Show target distribution if available
-    if target_col in df.columns:
+    if target_col in df_display.columns:
         st.subheader("🎯 Target Distribution")
         try:
             # Must normalize target column first if it hasn't been done for correct 0/1 counts
-            df_target_check = normalize_target(df.copy(), target_col)
+            df_target_check = normalize_target(df_display.copy(), target_col)
             churn_counts = df_target_check[target_col].value_counts().sort_index()
             
             col1, col2 = st.columns(2)
@@ -857,11 +869,18 @@ elif page == "🧹 Data Cleaning":
                 st.write("**Value Counts:**")
                 for idx, count in churn_counts.items():
                     st.metric(f"Class {idx}", count)
+                
+                # Check for class balance after custom cleaning
+                if len(churn_counts) < 2:
+                    st.error("❌ The data must have at least two classes (0 and 1) in the target column to train a model.")
+                elif churn_counts.min() < 50:
+                    st.warning("⚠️ Very small class size detected! Consider checking for proper target normalization.")
         except:
-            st.write(df[target_col].value_counts())
+            st.write(df_display[target_col].value_counts())
 
-# ==================== PAGE 4: TRAIN MODELS ====================
+# ==================== PAGE 4: TRAIN MODELS (UNMODIFIED) ====================
 elif page == "🤖 Train Models":
+# ... (rest of the page remains the same)
     st.header("🤖 Train Machine Learning Models")
     
     if st.session_state.df_clean is None or st.session_state.target_col is None:
@@ -895,8 +914,9 @@ elif page == "🤖 Train Models":
                     st.subheader("📊 Training Results")
                     st.dataframe(results.style.highlight_max(axis=0, color='lightgreen'), width='stretch')
 
-# ==================== PAGE 5: MODEL COMPARISON ====================
+# ==================== PAGE 5: MODEL COMPARISON (UNMODIFIED) ====================
 elif page == "📈 Model Comparison":
+# ... (rest of the page remains the same)
     st.header("📈 Model Performance Comparison")
     
     if st.session_state.results is None:
@@ -983,8 +1003,9 @@ elif page == "📈 Model Comparison":
             st.success(f"✅ {selected_model} retrained on full dataset and deployed to production!")
             st.info(f"📊 Model trained on all {len(df_clean)} samples")
 
-# ==================== PAGE 6: MAKE PREDICTIONS ====================
+# ==================== PAGE 6: MAKE PREDICTIONS (UNMODIFIED) ====================
 elif page == "🔮 Make Predictions":
+# ... (rest of the page remains the same)
     st.header("🔮 Predict Customer Churn")
     
     if st.session_state.production_model is None:
