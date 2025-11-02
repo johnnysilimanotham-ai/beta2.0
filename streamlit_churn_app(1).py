@@ -555,7 +555,7 @@ elif page == "🧹 Data Cleaning":
         
         # Target column selection
         target_col = st.selectbox(
-            "Select Target Column (Churn)",
+            "Select Target Column",
             options=df.columns.tolist(),
             index=df.columns.tolist().index(st.session_state.target_col) if st.session_state.target_col and st.session_state.target_col in df.columns else (len(df.columns)-1 if 'churn' in str(df.columns).lower() else 0)
         )
