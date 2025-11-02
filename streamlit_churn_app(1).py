@@ -344,7 +344,7 @@ elif page == "📊 Data Visualization":
             st.write("💡 **Insight:** Look for skewed distributions that might benefit from transformation, and outliers that might need handling.")
             
             selected_numeric = st.multiselect(
-                "Select features to visualize",
+                "Select numeric features to visualize",
                 numeric_cols,
                 default=numeric_cols[:min(4, len(numeric_cols))]
             )
