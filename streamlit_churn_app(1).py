@@ -116,7 +116,8 @@ def clean_data(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     # Drop ID columns first (retaining the quick clean version logic)
     id_cols = [c for c in df.columns if 'id' in c.lower()]
     if id_cols:
-        df = df.drop(columns=id_cols, errors='ignore') # Use errors='ignore' for safety
+        # Robustness fix: use errors='ignore' in case a detected ID column was already dropped
+        df = df.drop(columns=id_cols, errors='ignore') 
     
     # Normalize target column
     df = normalize_target(df, target_col)
@@ -379,4 +380,698 @@ elif page == "📊 Data Visualization":
         # Categorical features
         if categorical_cols:
             st.subheader("📊 Categorical Features Analysis")
-            st.write("💡 **Insight:** High
+            st.write("💡 **Insight:** High cardinality (many unique values) might require encoding strategies or grouping rare categories.")
+            
+            selected_cat = st.selectbox("Select categorical feature", categorical_cols)
+            
+            if selected_cat:
+                unique_count = df[selected_cat].nunique()
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    value_counts = df[selected_cat].value_counts().head(15)
+                    fig = px.bar(
+                        x=value_counts.index,
+                        y=value_counts.values,
+                        labels={'x': selected_cat, 'y': 'Count'},
+                        title=f"Top 15 values in {selected_cat}",
+                        color_discrete_sequence=['#764ba2']
+                    )
+                    fig.update_xaxes(tickangle=-45)
+                    st.plotly_chart(fig, width='stretch')
+                
+                with col2:
+                    st.metric("Unique Values", unique_count)
+                    st.metric("Most Common", value_counts.index[0])
+                    st.metric("Frequency", value_counts.values[0])
+                    
+                    if unique_count > 20:
+                        st.warning(f"⚠️ High cardinality: {unique_count} unique values")
+                    else:
+                        st.success("✅ Manageable cardinality")
+        
+        # Correlation analysis
+        if len(numeric_cols) > 1:
+            st.subheader("🔥 Correlation Analysis")
+            st.write("💡 **Insight:** Highly correlated features (>0.9) might be redundant. Target correlation shows feature importance.")
+            
+            corr_matrix = df[numeric_cols].corr()
+            
+            # Show full heatmap
+            fig = px.imshow(
+                corr_matrix,
+                text_auto='.2f',
+                title="Feature Correlation Heatmap",
+                color_continuous_scale='RdBu_r',
+                aspect="auto",
+                zmin=-1,
+                zmax=1
+            )
+            st.plotly_chart(fig, width='stretch')
+            
+            # Highlight strong correlations
+            with st.expander("🔍 Strong Correlations (>0.7 or <-0.7)"):
+                strong_corr = []
+                for i in range(len(corr_matrix.columns)):
+                    for j in range(i+1, len(corr_matrix.columns)):
+                        if abs(corr_matrix.iloc[i, j]) > 0.7:
+                            strong_corr.append({
+                                'Feature 1': corr_matrix.columns[i],
+                                'Feature 2': corr_matrix.columns[j],
+                                'Correlation': corr_matrix.iloc[i, j]
+                            })
+                
+                if strong_corr:
+                    st.dataframe(pd.DataFrame(strong_corr), width='stretch')
+                    st.warning("⚠️ Consider removing one feature from highly correlated pairs")
+                else:
+                    st.success("✅ No strong multicollinearity detected")
+        
+        # Target relationship analysis (if target is available)
+        if st.session_state.target_col and st.session_state.target_col in df.columns:
+            st.subheader("🎯 Features vs Target Relationship")
+            st.write("💡 **Insight:** Features showing clear separation between classes are likely to be predictive.")
+            
+            target_col = st.session_state.target_col
+            
+            # Correlation with target for numeric features
+            if numeric_cols and target_col in numeric_cols:
+                target_corr = df[numeric_cols].corrwith(df[target_col]).abs().sort_values(ascending=False)
+                target_corr = target_corr[target_corr.index != target_col]
+                
+                if len(target_corr) > 0:
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        fig = px.bar(
+                            x=target_corr.index[:10],
+                            y=target_corr.values[:10],
+                            title="Top 10 Features by Target Correlation",
+                            labels={'x': 'Feature', 'y': 'Absolute Correlation'},
+                            color=target_corr.values[:10],
+                            color_continuous_scale='Viridis'
+                        )
+                        fig.update_xaxes(tickangle=-45)
+                        st.plotly_chart(fig, width='stretch')
+                    
+                    with col2:
+                        st.write("**Top Correlated Features:**")
+                        for feat, corr in target_corr.head(5).items():
+                            st.metric(feat, f"{corr:.3f}")
+            
+            # Box plots for numeric features
+            if numeric_cols:
+                selected_feature = st.selectbox(
+                    "Select feature to compare with target",
+                    [col for col in numeric_cols if col != target_col]
+                )
+                
+                if selected_feature:
+                    fig = px.box(
+                        df,
+                        x=target_col,
+                        y=selected_feature,
+                        title=f"{selected_feature} by {target_col}",
+                        color=target_col,
+                        color_discrete_sequence=['#667eea', '#764ba2']
+                    )
+                    st.plotly_chart(fig, width='stretch')
+        
+        # Recommendations section
+        st.subheader("💡 Recommendations for Model Training")
+        
+        recommendations = []
+        
+        # Check for missing data
+        if missing_pct > 10:
+            recommendations.append("⚠️ **High missing data** - Consider imputation strategies or removing features with >50% missing")
+        
+        # Check for imbalanced target
+        if st.session_state.target_col and st.session_state.target_col in df.columns:
+            target_dist = df[st.session_state.target_col].value_counts(normalize=True)
+            if len(target_dist) >= 2 and target_dist.min() < 0.2:
+                recommendations.append("⚠️ **Imbalanced target** - Consider using stratified sampling or SMOTE for model training")
+        
+        # Check for high cardinality
+        high_card_features = [col for col in categorical_cols if df[col].nunique() > 50]
+        if high_card_features:
+            recommendations.append(f"⚠️ **High cardinality features** - {', '.join(high_card_features[:3])} - Consider target encoding or feature hashing")
+        
+        # Check for skewed features
+        if numeric_cols:
+            skewed_features = [col for col in numeric_cols if abs(df[col].skew()) > 2]
+            if skewed_features:
+                recommendations.append(f"⚠️ **Skewed features** - {', '.join(skewed_features[:3])} - Consider log transformation")
+        
+        # Model suggestions
+        if len(numeric_cols) > len(categorical_cols):
+            recommendations.append("✅ **Mostly numeric data** - SVM and Logistic Regression likely to perform well")
+        else:
+            recommendations.append("✅ **Mixed/Categorical data** - Random Forest and Gradient Boosting recommended")
+        
+        if not recommendations:
+            recommendations.append("✅ Data looks good! Ready for model training.")
+        
+        for rec in recommendations:
+            st.write(rec)
+        
+        # Navigation hint
+        st.info("💡 **Next Steps:** Review these insights, go back to Data Cleaning to make adjustments if needed, or proceed to Train Models when ready!")
+
+# ==================== PAGE 3: DATA CLEANING ====================
+elif page == "🧹 Data Cleaning":
+    st.header("🧹 Data Cleaning & Preparation")
+    
+    if st.session_state.df_raw is None:
+        st.warning("⚠️ Please upload a dataset first!")
+    else:
+        # Use cleaned data if available, otherwise start with raw
+        if st.session_state.df_clean is not None:
+            df = st.session_state.df_clean.copy()
+            st.info("📋 Working with previously cleaned data. You can make additional changes below.")
+        else:
+            df = st.session_state.df_raw.copy()
+        
+        st.subheader("⚙️ Target Column Selection")
+        
+        # Target column selection
+        target_col = st.selectbox(
+            "Select Target Column (Churn)",
+            options=df.columns.tolist(),
+            index=df.columns.tolist().index(st.session_state.target_col) if st.session_state.target_col and st.session_state.target_col in df.columns else (len(df.columns)-1 if 'churn' in str(df.columns).lower() else 0)
+        )
+        
+        st.session_state.target_col = target_col
+        
+        # Show current data quality issues
+        st.subheader("🔍 Data Quality Overview")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Rows", len(df))
+        with col2:
+            st.metric("Total Columns", len(df.columns))
+        with col3:
+            st.metric("Missing Values", df.isnull().sum().sum())
+        with col4:
+            st.metric("Duplicate Rows", df.duplicated().sum())
+        
+        # Missing values details
+        missing_df = pd.DataFrame({
+            'Column': df.columns,
+            'Missing Count': df.isnull().sum().values,
+            'Missing %': (df.isnull().sum().values / len(df) * 100).round(2)
+        })
+        missing_df = missing_df[missing_df['Missing Count'] > 0].sort_values('Missing Count', ascending=False)
+        
+        if len(missing_df) > 0:
+            st.subheader("⚠️ Columns with Missing Values")
+            st.dataframe(missing_df, width='stretch')
+        
+        # Granular cleaning options
+        st.subheader("🛠️ Cleaning Operations")
+        
+        with st.expander("🗑️ Remove Duplicate Rows", expanded=False):
+            if df.duplicated().sum() > 0:
+                st.write(f"Found **{df.duplicated().sum()}** duplicate rows")
+                if st.button("Remove Duplicates"):
+                    df = df.drop_duplicates()
+                    st.session_state.df_clean = df
+                    st.success(f"✅ Removed duplicates! Now {len(df)} rows.")
+                    st.rerun()
+            else:
+                st.info("No duplicates found")
+        
+        with st.expander("🔢 Handle Missing Values (Column-by-Column)", expanded=True):
+            if missing_df.empty:
+                st.info("No missing values found!")
+            else:
+                st.write("💡 **Tip:** Different strategies work better for different features. Try different approaches and check visualizations!")
+                
+                cols_with_missing = missing_df['Column'].tolist()
+                selected_col = st.selectbox("Select column to handle", cols_with_missing)
+                
+                if selected_col:
+                    col_data = df[selected_col]
+                    st.write(f"**{selected_col}**: {col_data.isnull().sum()} missing values ({(col_data.isnull().sum()/len(df)*100):.1f}%)")
+                    
+                    # Determine if numeric or categorical
+                    is_numeric = pd.api.types.is_numeric_dtype(col_data)
+                    
+                    if is_numeric:
+                        strategy = st.radio(
+                            f"Strategy for {selected_col}",
+                            ["Keep missing (let model handle)", "Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"],
+                            key=f"strategy_{selected_col}"
+                        )
+                    else:
+                        strategy = st.radio(
+                            f"Strategy for {selected_col}",
+                            ["Keep missing (let model handle)", "Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"],
+                            key=f"strategy_{selected_col}"
+                        )
+                    
+                    if st.button(f"Apply to {selected_col}", type="primary"):
+                        if strategy == "Keep missing (let model handle)":
+                            st.info("✅ Keeping missing values. The model preprocessing will handle them.")
+                        elif strategy == "Fill with Mean":
+                            df[selected_col].fillna(df[selected_col].mean(), inplace=True)
+                            st.success(f"✅ Filled {selected_col} with mean value: {df[selected_col].mean():.2f}")
+                        elif strategy == "Fill with Median":
+                            df[selected_col].fillna(df[selected_col].median(), inplace=True)
+                            st.success(f"✅ Filled {selected_col} with median value: {df[selected_col].median():.2f}")
+                        elif strategy == "Fill with Zero":
+                            df[selected_col].fillna(0, inplace=True)
+                            st.success(f"✅ Filled {selected_col} with zeros")
+                        elif strategy == "Fill with Most Frequent":
+                            most_frequent = df[selected_col].mode()[0]
+                            df[selected_col].fillna(most_frequent, inplace=True)
+                            st.success(f"✅ Filled {selected_col} with most frequent value: {most_frequent}")
+                        elif strategy == "Fill with 'Unknown'":
+                            df[selected_col].fillna('Unknown', inplace=True)
+                            st.success(f"✅ Filled {selected_col} with 'Unknown'")
+                        elif strategy == "Drop rows with missing":
+                            before = len(df)
+                            df = df.dropna(subset=[selected_col])
+                            st.success(f"✅ Dropped {before - len(df)} rows with missing {selected_col}")
+                        
+                        st.session_state.df_clean = df
+                        st.rerun()
+        
+        with st.expander("🎯 Clean Target Column", expanded=False):
+            st.write(f"Current target: **{target_col}**")
+            st.write(f"Unique values: {df[target_col].unique()}")
+            st.write(f"Value counts:\n{df[target_col].value_counts()}")
+            
+            if st.button("Normalize Target to 0/1"):
+                try:
+                    df = normalize_target(df, target_col)
+                    df = df.dropna(subset=[target_col])
+                    st.session_state.df_clean = df
+                    st.success("✅ Target normalized!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+        
+        # =========================================================================
+        # MODIFIED SECTION: Remove Unwanted Columns (Replaces Remove ID Columns)
+        # =========================================================================
+        with st.expander("🗂️ Remove Unwanted Columns", expanded=False):
+            st.write("Select columns to permanently remove from the dataset (e.g., ID columns, metadata, highly redundant features).")
+            
+            # Allow user to select any columns to drop
+            # Exclude the current target column from the selection options
+            column_options = [col for col in df.columns if col != target_col]
+            
+            columns_to_drop = st.multiselect(
+                "Select columns to drop:",
+                options=column_options,
+                default=[]
+            )
+            
+            # Auto-detect initial suggestions based on 'id' keyword
+            suggested_id_cols = [c for c in df.columns if 'id' in c.lower() and c != target_col]
+            if suggested_id_cols:
+                 st.info(f"💡 **Suggested ID columns:** {', '.join(suggested_id_cols)}")
+
+            if columns_to_drop:
+                if st.button("Remove Selected Columns"):
+                    # Check if any selected column is the target column before dropping (robustness)
+                    if target_col in columns_to_drop:
+                         st.error(f"❌ Cannot remove the target column: **{target_col}**.")
+                    else:
+                        df = df.drop(columns=columns_to_drop)
+                        st.session_state.df_clean = df
+                        st.success(f"✅ Removed {len(columns_to_drop)} columns: {', '.join(columns_to_drop)}")
+                        st.rerun()
+            else:
+                st.info("No columns selected for removal.")
+        # =========================================================================
+        # END OF MODIFIED SECTION
+        # =========================================================================
+        
+        # Quick clean all button
+        st.subheader("⚡ Quick Actions")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔄 Auto-Clean All", help="Automatically clean: remove IDs, duplicates, normalize target"):
+                try:
+                    with st.spinner("Auto-cleaning..."):
+                        df_clean = clean_data(df, target_col)
+                        st.session_state.df_clean = df_clean
+                        st.session_state.target_col = target_col
+                    st.success("✅ Auto-cleaning complete!")
+                    st.rerun()
+                except ValueError as e:
+                    st.error(f"❌ Error: {str(e)}")
+        
+        with col2:
+            if st.button("↩️ Reset to Original Data"):
+                st.session_state.df_clean = None
+                st.session_state.target_col = None
+                st.info("🔄 Reset to original data")
+                st.rerun()
+        
+        # Show current state
+        st.subheader("📊 Current Data Preview")
+        st.dataframe(df.head(10), width='stretch')
+        
+        # Show target distribution if available
+        if target_col in df.columns:
+            st.subheader("🎯 Target Distribution")
+            try:
+                churn_counts = df[target_col].value_counts().sort_index()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    labels = [str(v) for v in churn_counts.index]
+                    fig = px.pie(
+                        values=churn_counts.values,
+                        names=labels,
+                        title=f"{target_col} Distribution",
+                        color_discrete_sequence=['#667eea', '#764ba2']
+                    )
+                    st.plotly_chart(fig, width='stretch')
+                
+                with col2:
+                    st.write("**Value Counts:**")
+                    for idx, count in churn_counts.items():
+                        st.metric(str(idx), count)
+            except:
+                st.write(df[target_col].value_counts())
+
+# ==================== PAGE 4: TRAIN MODELS ====================
+elif page == "🤖 Train Models":
+    st.header("🤖 Train Machine Learning Models")
+    
+    if st.session_state.df_clean is None:
+        st.warning("⚠️ Please clean your data first!")
+    else:
+        df_clean = st.session_state.df_clean
+        target_col = st.session_state.target_col
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            test_size = st.slider("Test Set Size (%)", 10, 40, 20) / 100
+        with col2:
+            st.metric("Training Samples", int(len(df_clean) * (1 - test_size)))
+        
+        if st.button("🚀 Train All Models", type="primary"):
+            with st.spinner("Training models... This may take a minute."):
+                results, models, schema, X_test = train_models(df_clean, target_col, test_size)
+                
+                st.session_state.results = results
+                st.session_state.models = models
+                st.session_state.feature_schema = schema
+                st.session_state.X_test = X_test
+            
+            st.success("✅ All models trained successfully!")
+            st.balloons()
+            
+            st.subheader("📊 Training Results")
+            st.dataframe(results.style.highlight_max(axis=0, color='lightgreen'), width='stretch')
+
+# ==================== PAGE 5: MODEL COMPARISON ====================
+elif page == "📈 Model Comparison":
+    st.header("📈 Model Performance Comparison")
+    
+    if st.session_state.results is None:
+        st.warning("⚠️ Please train models first!")
+    else:
+        results = st.session_state.results
+        models = st.session_state.models
+        
+        # Metrics comparison
+        st.subheader("📈 Performance Metrics")
+        
+        fig = go.Figure()
+        for metric in ['accuracy', 'precision', 'recall', 'f1', 'roc_auc']:
+            fig.add_trace(go.Bar(
+                name=metric.upper(),
+                x=results.index,
+                y=results[metric],
+                text=results[metric].round(3),
+                textposition='auto',
+            ))
+        
+        fig.update_layout(
+            barmode='group',
+            title="Model Performance Comparison",
+            xaxis_title="Model",
+            yaxis_title="Score",
+            height=500
+        )
+        st.plotly_chart(fig, width='stretch')
+        
+        # Best model
+        best_model = results.index[0]
+        st.subheader("🏆 Best Model")
+        st.success(f"**{best_model}** with F1 Score: {results.loc[best_model, 'f1']:.4f}")
+        
+        # Confusion matrices
+        st.subheader("🔢 Confusion Matrices")
+        cols = st.columns(3)
+        
+        for idx, (name, model_data) in enumerate(models.items()):
+            with cols[idx]:
+                cm = confusion_matrix(model_data['y_test'], model_data['y_pred'])
+                fig = px.imshow(
+                    cm,
+                    text_auto=True,
+                    labels=dict(x="Predicted", y="Actual"),
+                    x=['No Churn', 'Churn'],
+                    y=['No Churn', 'Churn'],
+                    title=name,
+                    color_continuous_scale='Purples'
+                )
+                st.plotly_chart(fig, width='stretch')
+        
+        # Deploy to production
+        st.subheader("🚀 Deploy Model")
+        selected_model = st.selectbox("Select model for production", results.index.tolist())
+        
+        if st.button("Deploy to Production", type="primary"):
+            with st.spinner(f"Retraining {selected_model} on full dataset..."):
+                # Get the model class
+                df_clean = st.session_state.df_clean
+                target_col = st.session_state.target_col
+                
+                y = df_clean[target_col].astype(int)
+                X = df_clean.drop(columns=[target_col])
+                
+                # Rebuild preprocessor and get model
+                preprocessor, schema = build_preprocessor(df_clean, target_col)
+                
+                models_def = {
+                    "Logistic Regression": LogisticRegression(max_iter=1000),
+                    "Random Forest": RandomForestClassifier(n_estimators=300, random_state=42),
+                    "SVM": SVC(kernel="rbf", probability=True, random_state=42, max_iter=2000)
+                }
+                
+                # Create pipeline with selected model and train on FULL dataset
+                model = models_def[selected_model]
+                full_pipeline = Pipeline([("prep", preprocessor), ("model", model)])
+                full_pipeline.fit(X, y)
+                
+                st.session_state.production_model = full_pipeline
+                st.session_state.feature_schema = schema
+            
+            st.success(f"✅ {selected_model} retrained on full dataset and deployed to production!")
+            st.info(f"📊 Model trained on all {len(df_clean)} samples")
+
+# ==================== PAGE 6: MAKE PREDICTIONS ====================
+elif page == "🔮 Make Predictions":
+    st.header("🔮 Predict Customer Churn")
+    
+    if st.session_state.production_model is None:
+        st.warning("⚠️ Please deploy a model first!")
+    else:
+        pipe = st.session_state.production_model
+        schema = st.session_state.feature_schema
+        
+        # Add prediction mode selector
+        prediction_mode = st.radio(
+            "Select Prediction Mode",
+            ["Single Customer Prediction", "Batch Prediction (Upload CSV)"],
+            horizontal=True
+        )
+        
+        if prediction_mode == "Single Customer Prediction":
+            st.subheader("🔍 Enter Customer Information")
+            
+            input_data = {}
+            
+            # Create input fields based on schema
+            num_cols = schema['numeric_features']
+            cat_cols = schema['categorical_features']
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Numeric Features**")
+                for col in num_cols:
+                    input_data[col] = st.number_input(f"{col}", value=0.0)
+            
+            with col2:
+                st.markdown("**Categorical Features**")
+                for col in cat_cols:
+                    # Get unique values from cleaned data if available
+                    if st.session_state.df_clean is not None and col in st.session_state.df_clean.columns:
+                        # Ensure the options are not empty and handle missing values gracefully
+                        options = st.session_state.df_clean[col].dropna().unique().tolist()
+                        if not options:
+                            options = ["N/A"]
+                        
+                        # Add a default value if the column has one, otherwise just use the first option
+                        default_index = 0
+                        
+                        input_data[col] = st.selectbox(f"{col}", options, index=default_index)
+                    else:
+                        input_data[col] = st.text_input(f"{col}")
+            
+            if st.button("🎯 Predict Churn", type="primary"):
+                # Create DataFrame with correct column order
+                X = pd.DataFrame([input_data], columns=num_cols + cat_cols)
+                
+                prediction = pipe.predict(X)[0]
+                proba = pipe.predict_proba(X)[0, 1]
+                
+                st.markdown("---")
+                st.subheader("🔮 Prediction Result")
+                
+                if prediction == 1:
+                    st.error("⚠️ **Customer will CHURN**")
+                    st.markdown(f"### Churn Probability: {proba*100:.1f}%")
+                else:
+                    st.success("✅ **Customer will NOT churn**")
+                    st.markdown(f"### Retention Probability: {(1-proba)*100:.1f}%")
+                
+                # Probability gauge
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=proba * 100,
+                    title={'text': "Churn Risk"},
+                    gauge={
+                        'axis': {'range': [0, 100]},
+                        'bar': {'color': "darkred" if proba > 0.5 else "darkgreen"},
+                        'steps': [
+                            {'range': [0, 33], 'color': "lightgreen"},
+                            {'range': [33, 66], 'color': "yellow"},
+                            {'range': [66, 100], 'color': "lightcoral"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 50
+                        }
+                    }
+                ))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, width='stretch')
+        
+        else:  # Batch Prediction
+            st.subheader("📁 Upload CSV File for Batch Predictions")
+            st.info("💡 Upload a CSV file with customer data. The file should NOT include the target column.")
+            
+            batch_file = st.file_uploader(
+                "Upload CSV for batch predictions",
+                type=['csv'],
+                key="batch_upload"
+            )
+            
+            if batch_file is not None:
+                batch_df = pd.read_csv(batch_file)
+                
+                st.success(f"✅ File loaded: {len(batch_df)} customers")
+                st.dataframe(batch_df.head(), width='stretch')
+                
+                if st.button("🎯 Predict All", type="primary"):
+                    try:
+                        with st.spinner("Making predictions..."):
+                            # Ensure columns match expected features
+                            num_cols = schema['numeric_features']
+                            cat_cols = schema['categorical_features']
+                            expected_cols = num_cols + cat_cols
+                            
+                            # Reorder columns to match training
+                            X_batch = batch_df[expected_cols]
+                            
+                            # Make predictions
+                            predictions = pipe.predict(X_batch)
+                            probabilities = pipe.predict_proba(X_batch)[:, 1]
+                            
+                            # Add predictions to dataframe
+                            result_df = batch_df.copy()
+                            result_df['Churn_Prediction'] = predictions
+                            result_df['Churn_Probability'] = probabilities
+                            result_df['Risk_Level'] = pd.cut(
+                                probabilities,
+                                bins=[0, 0.33, 0.66, 1.0],
+                                labels=['Low', 'Medium', 'High'],
+                                include_lowest=True # Added include_lowest for completeness
+                            )
+                        
+                        st.success("✅ Predictions completed!")
+                        
+                        # Summary metrics
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Customers", len(result_df))
+                        with col2:
+                            st.metric("Predicted Churns", (predictions == 1).sum())
+                        with col3:
+                            churn_rate = (predictions == 1).mean() * 100
+                            st.metric("Churn Rate", f"{churn_rate:.1f}%")
+                        
+                        # Risk distribution
+                        st.subheader("📊 Risk Distribution")
+                        risk_counts = result_df['Risk_Level'].value_counts()
+                        fig = px.pie(
+                            values=risk_counts.values,
+                            names=risk_counts.index,
+                            title="Customer Risk Distribution",
+                            color_discrete_sequence=['#667eea', '#FFA500', '#764ba2']
+                        )
+                        st.plotly_chart(fig, width='stretch')
+                        
+                        # Results table
+                        st.subheader("📋 Prediction Results")
+                        st.dataframe(
+                            result_df.sort_values('Churn_Probability', ascending=False),
+                            width='stretch'
+                        )
+                        
+                        # Download results
+                        csv = result_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download Predictions as CSV",
+                            data=csv,
+                            file_name="churn_predictions.csv",
+                            mime="text/csv"
+                        )
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error making predictions: {str(e)}")
+                        st.info("💡 Make sure your CSV has all the required features with correct names.")
+
+# Sidebar info
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 App Status")
+if st.session_state.df_raw is not None:
+    st.sidebar.success("✅ Data Uploaded")
+else:
+    st.sidebar.info("⏳ Awaiting Data")
+
+if st.session_state.df_clean is not None:
+    st.sidebar.success("✅ Data Cleaned")
+else:
+    st.sidebar.info("⏳ Awaiting Cleaning")
+
+if st.session_state.results is not None:
+    st.sidebar.success("✅ Models Trained")
+else:
+    st.sidebar.info("⏳ Awaiting Training")
+
+if st.session_state.production_model is not None:
+    st.sidebar.success("✅ Model Deployed")
+else:
+    st.sidebar.info("⏳ Awaiting Deployment")
