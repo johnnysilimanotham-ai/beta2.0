@@ -1,6 +1,12 @@
-streamlit
-plotly
-scikit-learn
-pandas
-numpy
-joblib
+# Core
+streamlit>=1.32,<2.0
+pandas>=1.5
+numpy>=1.24
+scikit-learn>=1.2
+
+# plotting & UI
+plotly>=5.0
+joblib>=1.2
+
+# optional but commonly useful
+xgboost>=1.7    # optional: heavy to build but provides XGBoost model support
