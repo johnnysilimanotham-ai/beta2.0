@@ -25,12 +25,6 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score,
     confusion_matrix, roc_curve
 )
-# === Compatibility fix for Streamlit >= 1.32 ===
-def safe_rerun():
-    if hasattr(st, "rerun"):
-        st.rerun()
-    elif hasattr(st, "safe_rerun"):
-        st.safe_rerun()
 
 # ==================== CONFIGURATION ====================
 st.set_page_config(
@@ -651,7 +645,7 @@ elif page == "🧹 Data Cleaning":
                     df = df.drop_duplicates()
                     st.session_state.df_clean = df
                     st.success(f"✅ Removed duplicates! Now {len(df)} rows.")
-                    st.experimental_rerun()
+                    st.rerun() # <-- FIX 1
             else:
                 st.info("No duplicates found")
 
@@ -709,7 +703,7 @@ elif page == "🧹 Data Cleaning":
                             st.success(f"✅ Dropped {before - len(df)} rows with missing {selected_col}")
 
                         st.session_state.df_clean = df
-                        st.safe_rerun()
+                        st.rerun() # <-- FIX 2
 
         with st.expander("🎯 Clean Target Column", expanded=False):
             st.write(f"Current target: **{target_col}**")
@@ -723,7 +717,7 @@ elif page == "🧹 Data Cleaning":
                     df = df.dropna(subset=[target_col])
                     st.session_state.df_clean = df
                     st.success("✅ Target normalized!")
-                    st.safe_rerun()
+                    st.rerun() # <-- FIX 3
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
@@ -747,7 +741,7 @@ elif page == "🧹 Data Cleaning":
                     df = df.drop(columns=selected_to_drop)
                     st.session_state.df_clean = df
                     st.success(f"✅ Dropped columns: {', '.join(selected_to_drop)}")
-                    st.safe_rerun()
+                    st.rerun() # <-- FIX 4
                 else:
                     st.info("No columns selected")
 
