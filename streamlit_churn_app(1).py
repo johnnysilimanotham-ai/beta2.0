@@ -239,7 +239,7 @@ st.markdown('<h1 class="main-header">🎯 Customer Churn Prediction Platform</h1
 
 # Sidebar Navigation
 page = st.sidebar.selectbox(
-    "🔍 Navigation",
+    "📍 Navigation",
     ["📤 Upload Data", "📊 Data Visualization", "🧹 Data Cleaning", "🤖 Train Models", "📈 Model Comparison", "🔮 Make Predictions"]
 )
 
@@ -268,7 +268,7 @@ if page == "📤 Upload Data":
             st.metric("Missing Values", df.isnull().sum().sum())
         
         st.subheader("📋 Data Preview")
-        st.dataframe(df.head(10), width='stretch')
+        st.dataframe(df.head(10), use_container_width=True)
         
         st.subheader("📊 Column Information")
         info_df = pd.DataFrame({
@@ -277,7 +277,7 @@ if page == "📤 Upload Data":
             "Non-Null Count": df.count().values,
             "Null Count": df.isnull().sum().values
         })
-        st.dataframe(info_df, width='stretch')
+        st.dataframe(info_df, use_container_width=True)
 
 # ==================== PAGE 2: DATA VISUALIZATION ====================
 elif page == "📊 Data Visualization":
@@ -329,9 +329,9 @@ elif page == "📊 Data Visualization":
                     color='Percent',
                     color_continuous_scale='Reds'
                 )
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
             with col2:
-                st.dataframe(missing_data, width='stretch')
+                st.dataframe(missing_data, use_container_width=True)
             
             st.info("💡 **Insight:** Features with >50% missing data might need to be dropped. Features with <5% missing can often be imputed.")
         else:
@@ -359,7 +359,7 @@ elif page == "📊 Data Visualization":
                             color_discrete_sequence=['#667eea'],
                             marginal="box"
                         )
-                        st.plotly_chart(fig, width='stretch')
+                        st.plotly_chart(fig, use_container_width=True)
                         
                         # Stats summary
                         with st.expander(f"📊 Statistics for {col}"):
@@ -374,7 +374,7 @@ elif page == "📊 Data Visualization":
                                     df[col].skew()
                                 ]
                             })
-                            st.dataframe(stats_df, width='stretch')
+                            st.dataframe(stats_df, use_container_width=True)
         
         # Categorical features
         if categorical_cols:
@@ -397,7 +397,7 @@ elif page == "📊 Data Visualization":
                         color_discrete_sequence=['#764ba2']
                     )
                     fig.update_xaxes(tickangle=-45)
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, use_container_width=True)
                 
                 with col2:
                     st.metric("Unique Values", unique_count)
@@ -426,7 +426,7 @@ elif page == "📊 Data Visualization":
                 zmin=-1,
                 zmax=1
             )
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
             
             # Highlight strong correlations
             with st.expander("🔍 Strong Correlations (>0.7 or <-0.7)"):
@@ -441,7 +441,7 @@ elif page == "📊 Data Visualization":
                             })
                 
                 if strong_corr:
-                    st.dataframe(pd.DataFrame(strong_corr), width='stretch')
+                    st.dataframe(pd.DataFrame(strong_corr), use_container_width=True)
                     st.warning("⚠️ Consider removing one feature from highly correlated pairs")
                 else:
                     st.success("✅ No strong multicollinearity detected")
@@ -470,7 +470,7 @@ elif page == "📊 Data Visualization":
                             color_continuous_scale='Viridis'
                         )
                         fig.update_xaxes(tickangle=-45)
-                        st.plotly_chart(fig, width='stretch')
+                        st.plotly_chart(fig, use_container_width=True)
                     
                     with col2:
                         st.write("**Top Correlated Features:**")
@@ -493,7 +493,7 @@ elif page == "📊 Data Visualization":
                         color=target_col,
                         color_discrete_sequence=['#667eea', '#764ba2']
                     )
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, use_container_width=True)
         
         # Recommendations section
         st.subheader("💡 Recommendations for Model Training")
@@ -583,7 +583,7 @@ elif page == "🧹 Data Cleaning":
         
         if len(missing_df) > 0:
             st.subheader("⚠️ Columns with Missing Values")
-            st.dataframe(missing_df, width='stretch')
+            st.dataframe(missing_df, use_container_width=True)
         
         # Granular cleaning options
         st.subheader("🛠️ Cleaning Operations")
@@ -670,374 +670,8 @@ elif page == "🧹 Data Cleaning":
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
         
-        with st.expander("🗂️ Remove ID Columns", expanded=False):
-            id_cols = [c for c in df.columns if 'id' in c.lower()]
-            if id_cols:
-                st.write(f"Found ID columns: {id_cols}")
-                if st.button("Remove ID Columns"):
-                    df = df.drop(columns=id_cols)
-                    st.session_state.df_clean = df
-                    st.success(f"✅ Removed {len(id_cols)} ID columns")
-                    st.rerun()
-            else:
-                st.info("No ID columns detected")
-        
-        # Quick clean all button
-        st.subheader("⚡ Quick Actions")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Auto-Clean All", help="Automatically clean: remove IDs, duplicates, normalize target"):
-                try:
-                    with st.spinner("Auto-cleaning..."):
-                        df_clean = clean_data(df, target_col)
-                        st.session_state.df_clean = df_clean
-                        st.session_state.target_col = target_col
-                    st.success("✅ Auto-cleaning complete!")
-                    st.rerun()
-                except ValueError as e:
-                    st.error(f"❌ Error: {str(e)}")
-        
-        with col2:
-            if st.button("↩️ Reset to Original Data"):
-                st.session_state.df_clean = None
-                st.session_state.target_col = None
-                st.info("🔄 Reset to original data")
-                st.rerun()
-        
-        # Show current state
-        st.subheader("📊 Current Data Preview")
-        st.dataframe(df.head(10), width='stretch')
-        
-        # Show target distribution if available
-        if target_col in df.columns:
-            st.subheader("🎯 Target Distribution")
-            try:
-                churn_counts = df[target_col].value_counts().sort_index()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    labels = [str(v) for v in churn_counts.index]
-                    fig = px.pie(
-                        values=churn_counts.values,
-                        names=labels,
-                        title=f"{target_col} Distribution",
-                        color_discrete_sequence=['#667eea', '#764ba2']
-                    )
-                    st.plotly_chart(fig, width='stretch')
-                
-                with col2:
-                    st.write("**Value Counts:**")
-                    for idx, count in churn_counts.items():
-                        st.metric(str(idx), count)
-            except:
-                st.write(df[target_col].value_counts())
-
-# ==================== PAGE 4: TRAIN MODELS ====================
-elif page == "🤖 Train Models":
-    st.header("🤖 Train Machine Learning Models")
-    
-    if st.session_state.df_clean is None:
-        st.warning("⚠️ Please clean your data first!")
-    else:
-        df_clean = st.session_state.df_clean
-        target_col = st.session_state.target_col
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            test_size = st.slider("Test Set Size (%)", 10, 40, 20) / 100
-        with col2:
-            st.metric("Training Samples", int(len(df_clean) * (1 - test_size)))
-        
-        if st.button("🚀 Train All Models", type="primary"):
-            with st.spinner("Training models... This may take a minute."):
-                results, models, schema, X_test = train_models(df_clean, target_col, test_size)
-                
-                st.session_state.results = results
-                st.session_state.models = models
-                st.session_state.feature_schema = schema
-                st.session_state.X_test = X_test
+        with st.expander("🗑️ Remove Unwanted Columns", expanded=False):
+            st.write("💡 **Tip:** Remove columns that won't help prediction (IDs, names, dates, high-cardinality features)")
             
-            st.success("✅ All models trained successfully!")
-            st.balloons()
-            
-            st.subheader("📊 Training Results")
-            st.dataframe(results.style.highlight_max(axis=0, color='lightgreen'), width='stretch')
-
-# ==================== PAGE 5: MODEL COMPARISON ====================
-elif page == "📈 Model Comparison":
-    st.header("📈 Model Performance Comparison")
-    
-    if st.session_state.results is None:
-        st.warning("⚠️ Please train models first!")
-    else:
-        results = st.session_state.results
-        models = st.session_state.models
-        
-        # Metrics comparison
-        st.subheader("📈 Performance Metrics")
-        
-        fig = go.Figure()
-        for metric in ['accuracy', 'precision', 'recall', 'f1', 'roc_auc']:
-            fig.add_trace(go.Bar(
-                name=metric.upper(),
-                x=results.index,
-                y=results[metric],
-                text=results[metric].round(3),
-                textposition='auto',
-            ))
-        
-        fig.update_layout(
-            barmode='group',
-            title="Model Performance Comparison",
-            xaxis_title="Model",
-            yaxis_title="Score",
-            height=500
-        )
-        st.plotly_chart(fig, width='stretch')
-        
-        # Best model
-        best_model = results.index[0]
-        st.subheader("🏆 Best Model")
-        st.success(f"**{best_model}** with F1 Score: {results.loc[best_model, 'f1']:.4f}")
-        
-        # Confusion matrices
-        st.subheader("🔢 Confusion Matrices")
-        cols = st.columns(3)
-        
-        for idx, (name, model_data) in enumerate(models.items()):
-            with cols[idx]:
-                cm = confusion_matrix(model_data['y_test'], model_data['y_pred'])
-                fig = px.imshow(
-                    cm,
-                    text_auto=True,
-                    labels=dict(x="Predicted", y="Actual"),
-                    x=['No Churn', 'Churn'],
-                    y=['No Churn', 'Churn'],
-                    title=name,
-                    color_continuous_scale='Purples'
-                )
-                st.plotly_chart(fig, width='stretch')
-        
-        # Deploy to production
-        st.subheader("🚀 Deploy Model")
-        selected_model = st.selectbox("Select model for production", results.index.tolist())
-        
-        if st.button("Deploy to Production", type="primary"):
-            with st.spinner(f"Retraining {selected_model} on full dataset..."):
-                # Get the model class
-                df_clean = st.session_state.df_clean
-                target_col = st.session_state.target_col
-                
-                y = df_clean[target_col].astype(int)
-                X = df_clean.drop(columns=[target_col])
-                
-                # Rebuild preprocessor and get model
-                preprocessor, schema = build_preprocessor(df_clean, target_col)
-                
-                models_def = {
-                    "Logistic Regression": LogisticRegression(max_iter=1000),
-                    "Random Forest": RandomForestClassifier(n_estimators=300, random_state=42),
-                    "SVM": SVC(kernel="rbf", probability=True, random_state=42, max_iter=2000)
-                }
-                
-                # Create pipeline with selected model and train on FULL dataset
-                model = models_def[selected_model]
-                full_pipeline = Pipeline([("prep", preprocessor), ("model", model)])
-                full_pipeline.fit(X, y)
-                
-                st.session_state.production_model = full_pipeline
-                st.session_state.feature_schema = schema
-            
-            st.success(f"✅ {selected_model} retrained on full dataset and deployed to production!")
-            st.info(f"📊 Model trained on all {len(df_clean)} samples")
-
-# ==================== PAGE 6: MAKE PREDICTIONS ====================
-elif page == "🔮 Make Predictions":
-    st.header("🔮 Predict Customer Churn")
-    
-    if st.session_state.production_model is None:
-        st.warning("⚠️ Please deploy a model first!")
-    else:
-        pipe = st.session_state.production_model
-        schema = st.session_state.feature_schema
-        
-        # Add prediction mode selector
-        prediction_mode = st.radio(
-            "Select Prediction Mode",
-            ["Single Customer Prediction", "Batch Prediction (Upload CSV)"],
-            horizontal=True
-        )
-        
-        if prediction_mode == "Single Customer Prediction":
-            st.subheader("🔍 Enter Customer Information")
-            
-            input_data = {}
-            
-            # Create input fields based on schema
-            num_cols = schema['numeric_features']
-            cat_cols = schema['categorical_features']
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Numeric Features**")
-                for col in num_cols:
-                    input_data[col] = st.number_input(f"{col}", value=0.0)
-            
-            with col2:
-                st.markdown("**Categorical Features**")
-                for col in cat_cols:
-                    # Get unique values from cleaned data if available
-                    if st.session_state.df_clean is not None and col in st.session_state.df_clean.columns:
-                        options = st.session_state.df_clean[col].unique().tolist()
-                        input_data[col] = st.selectbox(f"{col}", options)
-                    else:
-                        input_data[col] = st.text_input(f"{col}")
-            
-            if st.button("🎯 Predict Churn", type="primary"):
-                # Create DataFrame with correct column order
-                X = pd.DataFrame([input_data], columns=num_cols + cat_cols)
-                
-                prediction = pipe.predict(X)[0]
-                proba = pipe.predict_proba(X)[0, 1]
-                
-                st.markdown("---")
-                st.subheader("🔮 Prediction Result")
-                
-                if prediction == 1:
-                    st.error("⚠️ **Customer will CHURN**")
-                    st.markdown(f"### Churn Probability: {proba*100:.1f}%")
-                else:
-                    st.success("✅ **Customer will NOT churn**")
-                    st.markdown(f"### Retention Probability: {(1-proba)*100:.1f}%")
-                
-                # Probability gauge
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=proba * 100,
-                    title={'text': "Churn Risk"},
-                    gauge={
-                        'axis': {'range': [0, 100]},
-                        'bar': {'color': "darkred" if proba > 0.5 else "darkgreen"},
-                        'steps': [
-                            {'range': [0, 33], 'color': "lightgreen"},
-                            {'range': [33, 66], 'color': "yellow"},
-                            {'range': [66, 100], 'color': "lightcoral"}
-                        ],
-                        'threshold': {
-                            'line': {'color': "red", 'width': 4},
-                            'thickness': 0.75,
-                            'value': 50
-                        }
-                    }
-                ))
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, width='stretch')
-        
-        else:  # Batch Prediction
-            st.subheader("📁 Upload CSV File for Batch Predictions")
-            st.info("💡 Upload a CSV file with customer data. The file should NOT include the target column.")
-            
-            batch_file = st.file_uploader(
-                "Upload CSV for batch predictions",
-                type=['csv'],
-                key="batch_upload"
-            )
-            
-            if batch_file is not None:
-                batch_df = pd.read_csv(batch_file)
-                
-                st.success(f"✅ File loaded: {len(batch_df)} customers")
-                st.dataframe(batch_df.head(), width='stretch')
-                
-                if st.button("🎯 Predict All", type="primary"):
-                    try:
-                        with st.spinner("Making predictions..."):
-                            # Ensure columns match expected features
-                            num_cols = schema['numeric_features']
-                            cat_cols = schema['categorical_features']
-                            expected_cols = num_cols + cat_cols
-                            
-                            # Reorder columns to match training
-                            X_batch = batch_df[expected_cols]
-                            
-                            # Make predictions
-                            predictions = pipe.predict(X_batch)
-                            probabilities = pipe.predict_proba(X_batch)[:, 1]
-                            
-                            # Add predictions to dataframe
-                            result_df = batch_df.copy()
-                            result_df['Churn_Prediction'] = predictions
-                            result_df['Churn_Probability'] = probabilities
-                            result_df['Risk_Level'] = pd.cut(
-                                probabilities,
-                                bins=[0, 0.33, 0.66, 1.0],
-                                labels=['Low', 'Medium', 'High']
-                            )
-                        
-                        st.success("✅ Predictions completed!")
-                        
-                        # Summary metrics
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Total Customers", len(result_df))
-                        with col2:
-                            st.metric("Predicted Churns", (predictions == 1).sum())
-                        with col3:
-                            churn_rate = (predictions == 1).mean() * 100
-                            st.metric("Churn Rate", f"{churn_rate:.1f}%")
-                        
-                        # Risk distribution
-                        st.subheader("📊 Risk Distribution")
-                        risk_counts = result_df['Risk_Level'].value_counts()
-                        fig = px.pie(
-                            values=risk_counts.values,
-                            names=risk_counts.index,
-                            title="Customer Risk Distribution",
-                            color_discrete_sequence=['#667eea', '#FFA500', '#764ba2']
-                        )
-                        st.plotly_chart(fig, width='stretch')
-                        
-                        # Results table
-                        st.subheader("📋 Prediction Results")
-                        st.dataframe(
-                            result_df.sort_values('Churn_Probability', ascending=False),
-                            width='stretch'
-                        )
-                        
-                        # Download results
-                        csv = result_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Predictions as CSV",
-                            data=csv,
-                            file_name="churn_predictions.csv",
-                            mime="text/csv"
-                        )
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error making predictions: {str(e)}")
-                        st.info("💡 Make sure your CSV has all the required features with correct names.")
-
-# Sidebar info
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 App Status")
-if st.session_state.df_raw is not None:
-    st.sidebar.success("✅ Data Uploaded")
-else:
-    st.sidebar.info("⏳ Awaiting Data")
-
-if st.session_state.df_clean is not None:
-    st.sidebar.success("✅ Data Cleaned")
-else:
-    st.sidebar.info("⏳ Awaiting Cleaning")
-
-if st.session_state.results is not None:
-    st.sidebar.success("✅ Models Trained")
-else:
-    st.sidebar.info("⏳ Awaiting Training")
-
-if st.session_state.production_model is not None:
-    st.sidebar.success("✅ Model Deployed")
-else:
-    st.sidebar.info("⏳ Awaiting Deployment")
+            # Auto-detect potential columns to remove
+            potential
