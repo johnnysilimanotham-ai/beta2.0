@@ -636,6 +636,7 @@ elif page == "🧹 Data Cleaning":
     # Missing values details
     missing_df = pd.DataFrame({
         'Column': df.columns,
+        'Type': df.dtypes.astype(str),
         'Missing Count': df.isnull().sum().values,
         'Missing %': (df.isnull().sum().values / len(df) * 100).round(2)
     })
@@ -643,7 +644,7 @@ elif page == "🧹 Data Cleaning":
     
     if len(missing_df) > 0:
         st.subheader("⚠️ Columns with Missing Values")
-        st.dataframe(missing_df, width='stretch')
+        st.dataframe(missing_df.set_index('Column'), width='stretch')
     
     # Granular cleaning options
     st.subheader("🛠️ Cleaning Operations")
@@ -659,61 +660,103 @@ elif page == "🧹 Data Cleaning":
         else:
             st.info("No duplicates found")
     
-    with st.expander("🔢 Handle Missing Values (Column-by-Column)", expanded=True):
+    # --- MODIFIED: Handle Missing Values ---
+    with st.expander("🔢 Handle Missing Values (Bulk Imputation)", expanded=True):
         if missing_df.empty:
-            st.info("No missing values found!")
+            st.info("No missing values found in the current dataset!")
         else:
-            st.write("💡 **Tip:** Different strategies work better for different features. Try different approaches and check visualizations!")
+            st.write("💡 **Tip:** Apply a single imputation strategy to multiple numeric or categorical features at once.")
             
-            cols_with_missing = missing_df['Column'].tolist()
-            selected_col = st.selectbox("Select column to handle", cols_with_missing)
+            cols_with_missing = missing_df.index.tolist()
             
-            if selected_col:
-                col_data = df[selected_col]
-                st.write(f"**{selected_col}**: {col_data.isnull().sum()} missing values ({(col_data.isnull().sum()/len(df)*100):.1f}%)")
+            # --- Numeric Imputation ---
+            numeric_cols_with_missing = missing_df[missing_df['Type'].str.contains('float|int')].index.tolist()
+            if numeric_cols_with_missing:
+                st.markdown("##### Numeric Features Imputation")
                 
-                # Determine if numeric or categorical
-                is_numeric = pd.api.types.is_numeric_dtype(col_data)
+                selected_num_cols = st.multiselect(
+                    "Select numeric columns to impute:",
+                    options=numeric_cols_with_missing,
+                    key="select_num_impute"
+                )
                 
-                if is_numeric:
-                    strategy = st.radio(
-                        f"Strategy for {selected_col}",
-                        ["Keep missing (let model handle)", "Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"],
-                        key=f"strategy_{selected_col}"
-                    )
-                else:
-                    strategy = st.radio(
-                        f"Strategy for {selected_col}",
-                        ["Keep missing (let model handle)", "Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"],
-                        key=f"strategy_{selected_col}"
-                    )
+                num_strategy = st.radio(
+                    "Numeric Imputation Strategy:",
+                    ["Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"],
+                    key="num_strategy_radio"
+                )
                 
-                if st.button(f"Apply to {selected_col}", type="primary"):
-                    if strategy == "Keep missing (let model handle)":
-                        st.info("✅ Keeping missing values. The model preprocessing will handle them.")
-                    elif strategy == "Fill with Mean":
-                        df[selected_col].fillna(df[selected_col].mean(), inplace=True)
-                        st.success(f"✅ Filled {selected_col} with mean value: {df[selected_col].mean():.2f}")
-                    elif strategy == "Fill with Median":
-                        df[selected_col].fillna(df[selected_col].median(), inplace=True)
-                        st.success(f"✅ Filled {selected_col} with median value: {df[selected_col].median():.2f}")
-                    elif strategy == "Fill with Zero":
-                        df[selected_col].fillna(0, inplace=True)
-                        st.success(f"✅ Filled {selected_col} with zeros")
-                    elif strategy == "Fill with Most Frequent":
-                        most_frequent = df[selected_col].mode()[0]
-                        df[selected_col].fillna(most_frequent, inplace=True)
-                        st.success(f"✅ Filled {selected_col} with most frequent value: {most_frequent}")
-                    elif strategy == "Fill with 'Unknown'":
-                        df[selected_col].fillna('Unknown', inplace=True)
-                        st.success(f"✅ Filled {selected_col} with 'Unknown'")
-                    elif strategy == "Drop rows with missing":
+                if st.button("Apply Numeric Imputation", type="secondary"):
+                    if not selected_num_cols:
+                        st.warning("Please select at least one numeric column.")
+                    else:
                         before = len(df)
-                        df = df.dropna(subset=[selected_col])
-                        st.success(f"✅ Dropped {before - len(df)} rows with missing {selected_col}")
-                    
-                    st.session_state.df_clean = df
-                    st.rerun()
+                        for col in selected_num_cols:
+                            if num_strategy == "Fill with Mean":
+                                fill_value = df[col].mean()
+                                df[col].fillna(fill_value, inplace=True)
+                                st.success(f"✅ Filled **{col}** with mean value: {fill_value:.2f}")
+                            elif num_strategy == "Fill with Median":
+                                fill_value = df[col].median()
+                                df[col].fillna(fill_value, inplace=True)
+                                st.success(f"✅ Filled **{col}** with median value: {fill_value:.2f}")
+                            elif num_strategy == "Fill with Zero":
+                                df[col].fillna(0, inplace=True)
+                                st.success(f"✅ Filled **{col}** with zeros")
+                            elif num_strategy == "Drop rows with missing":
+                                pass # Handled outside the loop for accurate row count
+                        
+                        if num_strategy == "Drop rows with missing":
+                            df = df.dropna(subset=selected_num_cols)
+                            st.success(f"✅ Dropped **{before - len(df)}** rows with missing values in the selected numeric columns.")
+
+                        st.session_state.df_clean = df
+                        st.rerun()
+            
+            # --- Categorical Imputation ---
+            cat_cols_with_missing = missing_df[missing_df['Type'].str.contains('object|category|bool')].index.tolist()
+            if cat_cols_with_missing:
+                st.markdown("---")
+                st.markdown("##### Categorical Features Imputation")
+                
+                selected_cat_cols = st.multiselect(
+                    "Select categorical columns to impute:",
+                    options=cat_cols_with_missing,
+                    key="select_cat_impute"
+                )
+                
+                cat_strategy = st.radio(
+                    "Categorical Imputation Strategy:",
+                    ["Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"],
+                    key="cat_strategy_radio"
+                )
+                
+                if st.button("Apply Categorical Imputation", type="secondary"):
+                    if not selected_cat_cols:
+                        st.warning("Please select at least one categorical column.")
+                    else:
+                        before = len(df)
+                        for col in selected_cat_cols:
+                            if cat_strategy == "Fill with Most Frequent":
+                                most_frequent = df[col].mode()[0]
+                                df[col].fillna(most_frequent, inplace=True)
+                                st.success(f"✅ Filled **{col}** with most frequent value: {most_frequent}")
+                            elif cat_strategy == "Fill with 'Unknown'":
+                                df[col].fillna('Unknown', inplace=True)
+                                st.success(f"✅ Filled **{col}** with 'Unknown'")
+                            elif cat_strategy == "Drop rows with missing":
+                                pass # Handled outside the loop for accurate row count
+
+                        if cat_strategy == "Drop rows with missing":
+                            df = df.dropna(subset=selected_cat_cols)
+                            st.success(f"✅ Dropped **{before - len(df)}** rows with missing values in the selected categorical columns.")
+
+                        st.session_state.df_clean = df
+                        st.rerun()
+            
+            if not numeric_cols_with_missing and not cat_cols_with_missing:
+                 st.info("No more missing values to handle based on feature type.")
+    # --- END OF MODIFIED: Handle Missing Values ---
     
     with st.expander("🎯 Clean Target Column", expanded=False):
         st.write(f"Current target: **{target_col}**")
