@@ -671,4 +671,8 @@ elif page == "🧹 Data Cleaning":
                     st.error(f"Error: {str(e)}")
         
         with st.expander("🗑️ Remove Unwanted Columns", expanded=False):
-            st.write("💡 **Tip:** Remove columns that won't help prediction (IDs, names, dates, high-cardinality
+            st.write("Remove columns that won't help prediction like IDs, names, dates, or high-cardinality features")
+            
+            # Auto-detect potential columns to remove
+            potential_remove = []
+            for col in df
