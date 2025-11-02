@@ -273,7 +273,21 @@ if page == "📤 Upload Data":
             st.metric("Missing Values", df.isnull().sum().sum())
         
         # ------------------------------------------------------------------
-        # NEW/MOVED SECTION: Target Column Selection
+        # NEW SECTION: Data Management (Delete Dataset)
+        st.subheader("🗑️ Data Management")
+        if st.session_state.df_raw is not None:
+            if st.button("❌ Delete Current Dataset and Upload New One", type="secondary", help="This will clear all loaded data, cleaning steps, and model results."):
+                st.session_state.df_raw = None
+                st.session_state.df_clean = None
+                st.session_state.models = {}
+                st.session_state.results = None
+                st.session_state.production_model = None
+                st.session_state.feature_schema = None
+                st.session_state.target_col = None
+                st.warning("Current dataset deleted. Please upload a new CSV file.")
+                st.rerun()
+        # ------------------------------------------------------------------
+        
         st.subheader("🎯 Select Target Variable")
         
         # Calculate a sensible default index
@@ -291,7 +305,7 @@ if page == "📤 Upload Data":
             default_index = len(column_names) - 1 # Fallback to last column
             
         selected_target = st.selectbox(
-            "Select which variable you would like to predict.",
+            "Which column represents customer churn (The variable you want to predict)?",
             options=column_names,
             index=default_index,
             key="upload_target_select"
