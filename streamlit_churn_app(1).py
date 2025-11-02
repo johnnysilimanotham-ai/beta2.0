@@ -592,19 +592,39 @@ elif page == "🧹 Data Cleaning":
 
         st.subheader("⚙️ Target Column Selection")
 
-        # Target column selection default heuristics
+        # --- UNIVERSAL TARGET SELECTION LOGIC ---
         cols_list = df.columns.tolist()
+        lowered_cols = [c.lower() for c in cols_list]
         default_index = 0
-        lowered = [c.lower() for c in cols_list]
-        if 'churn' in lowered:
-            default_index = lowered.index('churn')
-        elif st.session_state.target_col and st.session_state.target_col in cols_list:
+        best_guess = None
+
+        # 1. Search for keyword matches (churn, target, label, outcome)
+        target_keywords = ['churn', 'target', 'label', 'outcome', 'y', 'is_default', 'status']
+        for keyword in target_keywords:
+            if keyword in lowered_cols:
+                best_guess = cols_list[lowered_cols.index(keyword)]
+                break
+        
+        # 2. If no keyword match, search for a column that is purely binary (0/1 or True/False)
+        if best_guess is None:
+            for col in cols_list:
+                # Check for two unique non-null values
+                if df[col].nunique(dropna=True) == 2:
+                    best_guess = col
+                    break
+
+        # 3. Set the default index based on the best guess or existing session state
+        if st.session_state.target_col and st.session_state.target_col in cols_list:
             default_index = cols_list.index(st.session_state.target_col)
-        else:
-            default_index = min(len(cols_list) - 1, 0)
+        elif best_guess and best_guess in cols_list:
+            default_index = cols_list.index(best_guess)
+        elif 'Unnamed: 0' in cols_list and len(cols_list) > 1:
+            # Skip unnamed columns if possible
+            default_index = 1
+        # --- END UNIVERSAL TARGET SELECTION LOGIC ---
 
         target_col = st.selectbox(
-            "Select Target Column (Churn)",
+            "Select Target Column (Outcome/Label)", # Updated label
             options=cols_list,
             index=default_index
         )
@@ -899,4 +919,3 @@ elif page == "🔮 Make Predictions":
                 st.error(f"Prediction failed: {e}")
 
         st.info("Tip: the feature names and types must match what was used for training.")
-
