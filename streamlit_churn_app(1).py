@@ -1,7 +1,7 @@
 """
 Customer Churn Prediction App
-Save this as: streamlit_app.py
-Run with: streamlit run streamlit_app.py
+Save this as: streamlit_churn_app.py
+Run with: streamlit run streamlit_churn_app.py
 """
 
 import io
@@ -671,9 +671,4 @@ elif page == "🧹 Data Cleaning":
                     st.error(f"Error: {str(e)}")
         
         with st.expander("🗑️ Remove Unwanted Columns", expanded=False):
-            st.write("💡 **Tip:** Remove columns that won't help prediction (IDs, names, dates, high-cardinality features)")
-            
-            # Auto-detect potential columns to remove
-            potential_remove = []
-            for col in df.columns:
-                if col == target_col
+            st.write("💡 **Tip:** Remove columns that won't help prediction (IDs, names, dates, high-cardinality
