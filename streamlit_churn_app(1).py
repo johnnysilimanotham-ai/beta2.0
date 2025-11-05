@@ -889,21 +889,6 @@ elif page == "🧹 Data Cleaning":
                 mime="text/csv",
                 help="Download the cleaned dataset in CSV format"
             )
-        
-        with col2:
-            # Excel download
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_display.to_excel(writer, index=False, sheet_name='Cleaned Data')
-            buffer.seek(0)
-            
-            st.download_button(
-                label="📥 Download as Excel",
-                data=buffer,
-                file_name="cleaned_data.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="Download the cleaned dataset in Excel format"
-            )
     
     # Show target distribution if available
     if target_col in df_display.columns:
