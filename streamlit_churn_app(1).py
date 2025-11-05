@@ -872,6 +872,38 @@ elif page == "🧹 Data Cleaning":
     df_display = st.session_state.df_clean if st.session_state.df_clean is not None else st.session_state.df_raw
     st.info(f"Currently displaying {'Cleaned Data' if st.session_state.df_clean is not None else 'Raw Data'}: {len(df_display)} rows.")
     st.dataframe(df_display.head(10), width='stretch')
+
+    # Download cleaned data option
+    if st.session_state.df_clean is not None:
+        st.subheader("📥 Download Cleaned Data")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # CSV download
+            csv = df_display.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv,
+                file_name="cleaned_data.csv",
+                mime="text/csv",
+                help="Download the cleaned dataset in CSV format"
+            )
+        
+        with col2:
+            # Excel download
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_display.to_excel(writer, index=False, sheet_name='Cleaned Data')
+            buffer.seek(0)
+            
+            st.download_button(
+                label="📥 Download as Excel",
+                data=buffer,
+                file_name="cleaned_data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download the cleaned dataset in Excel format"
+            )
     
     # Show target distribution if available
     if target_col in df_display.columns:
