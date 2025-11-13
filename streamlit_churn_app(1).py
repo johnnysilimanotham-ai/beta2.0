@@ -75,10 +75,14 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'production_model' not in st.session_state:
     st.session_state.production_model = None
+if 'production_model_name' not in st.session_state:
+    st.session_state.production_model_name = None
 if 'feature_schema' not in st.session_state:
     st.session_state.feature_schema = None
 if 'target_col' not in st.session_state:
     st.session_state.target_col = None
+if 'X_test' not in st.session_state:
+    st.session_state.X_test = None
 # --- Cleaning Configuration ---
 if 'imputation_strategies' not in st.session_state:
     st.session_state.imputation_strategies = {}
@@ -185,9 +189,10 @@ def apply_custom_cleaning(df: pd.DataFrame, target_col: str, drop_cols: list, im
             st.write(f"✅ **{col}** has no missing values.")
     
     # Final check for two classes
-    unique_classes = df_clean[target_col].unique()
-    if len(unique_classes) < 2:
-        raise ValueError(f"Target column must have at least 2 classes. Found only: {unique_classes}")
+    if target_col in df_clean.columns:
+        unique_classes = df_clean[target_col].unique()
+        if len(unique_classes) < 2:
+            raise ValueError(f"Target column must have at least 2 classes. Found only: {unique_classes}")
     
     return df_clean
 
@@ -220,7 +225,7 @@ def get_feature_influence(pipe: Pipeline, X_single_row: pd.DataFrame, schema: di
         influence_method = "Built-in Feature Importances (MDI)"
 
     if importances is None:
-        st.warning("⚠️ Feature influence for this model type cannot be calculated.")
+        # st.warning("⚠️ Feature influence for this model type cannot be calculated.")
         return pd.DataFrame()
         
     st.info(f"💡 **Feature Influence Method:** {influence_method} used for interpretation.")
@@ -238,7 +243,17 @@ def get_feature_influence(pipe: Pipeline, X_single_row: pd.DataFrame, schema: di
         X_processed_df = pd.DataFrame(X_processed, columns=feature_names)
         
         # Calculate the driver score (Coefficient * Preprocessed Value)
-        importance_df['Prediction_Driver'] = importance_df['Influence_Score'] * X_processed_df.iloc[0].loc[importance_df['Feature']].values
+        # Ensure alignment: only features in importance_df are considered
+        # Note: Features with zero coefficient might not be in the feature_names list from the pipeline if OHE dropped them,
+        # but here we rely on the importance_df features which should align with coef_
+        
+        # We need to map the coefficients (importances) and the processed features correctly
+        # The indices of feature_names match the indices of importances and X_processed
+        
+        # Re-index X_processed_df to match feature_names order, then grab the values for the features in importance_df
+        processed_values = X_processed_df.iloc[0].loc[importance_df['Feature']].values
+        
+        importance_df['Prediction_Driver'] = importance_df['Influence_Score'] * processed_values
         
         # Keep only features where the driver score is not near zero (i.e., the feature was actually present)
         importance_df = importance_df[abs(importance_df['Prediction_Driver']) > 1e-4]
@@ -416,6 +431,7 @@ if page == "📤 Upload Data":
             st.session_state.df_clean = None
             st.session_state.results = None
             st.session_state.production_model = None
+            st.session_state.production_model_name = None
             # Also reset cleaning instructions if data/target changes
             st.session_state.imputation_strategies = {}
             st.session_state.columns_to_drop = []
@@ -749,588 +765,510 @@ elif page == "🧹 Data Cleaning":
     missing_df = pd.DataFrame({
         'Column': df.columns,
         'Missing Count': df.isnull().sum().values,
-        'Missing %': (df.isnull().sum().values / len(df) * 100).round(2)
+        'Percent': (df.isnull().sum().values / len(df) * 100).round(2),
+        'DType': df.dtypes.astype(str)
     })
-    missing_df = missing_df[missing_df['Missing Count'] > 0].sort_values('Missing Count', ascending=False)
+    missing_df = missing_df[missing_df['Missing Count'] > 0].sort_values('Percent', ascending=False)
     
-    if len(missing_df) > 0:
-        st.subheader("⚠️ Columns with Missing Values")
-        st.dataframe(missing_df, width='stretch')
+    # ------------------------------------------------------------------
+    # 1. Column Dropping
+    st.subheader("🗑️ 1. Drop Columns")
+    current_cols = [c for c in df.columns if c != target_col]
     
-    # Granular cleaning options
-    st.subheader("🛠️ Configure Cleaning Operations")
+    # Preserve current state for the multiselect if possible
+    default_drop_cols = [c for c in st.session_state.columns_to_drop if c in current_cols]
     
-    # --- 1. REMOVE UNWANTED COLUMNS ---
-    with st.expander("🗂️ Select Columns to Remove", expanded=True):
-        st.write("Select columns to permanently remove from the dataset (e.g., ID columns, metadata, highly redundant features).")
+    st.session_state.columns_to_drop = st.multiselect(
+        "Select columns to permanently **drop** from the dataset (e.g., ID columns, features with too many missing values, or non-predictive features):",
+        options=current_cols,
+        default=default_drop_cols
+    )
+    
+    st.info(f"Columns selected to drop: **{len(st.session_state.columns_to_drop)}**")
+    
+    # ------------------------------------------------------------------
+    # 2. Missing Value Imputation
+    st.subheader("🩹 2. Missing Value Imputation / Handling")
+    
+    cols_with_missing = missing_df['Column'].tolist()
+    
+    if not cols_with_missing:
+        st.success("✅ No missing values found in the raw dataset!")
+    else:
+        st.write("Configure how to handle missing values for the following columns:")
         
-        column_options = [col for col in df.columns if col != target_col]
+        # Filter for columns that are not selected for dropping
+        cols_for_imputation = [c for c in cols_with_missing if c not in st.session_state.columns_to_drop]
         
-        # Auto-detect initial suggestions based on 'id' keyword
-        suggested_id_cols = [c for c in df.columns if 'id' in c.lower() and c != target_col]
-        
-        # Default the multiselect to the current session state list (or suggested IDs if first time)
-        initial_drop_selection = st.session_state.columns_to_drop if st.session_state.columns_to_drop else suggested_id_cols
-        
-        columns_to_drop_new = st.multiselect(
-            "Select columns to drop (will be applied on 'Apply' button click):",
-            options=column_options,
-            default=initial_drop_selection
-        )
-        
-        # Save the new list to session state immediately on change
-        st.session_state.columns_to_drop = columns_to_drop_new
-        
-        if suggested_id_cols:
-             st.info(f"💡 **Suggested ID columns:** {', '.join(suggested_id_cols)}")
-
-        st.success(f"Columns selected for removal: **{len(columns_to_drop_new)}**")
-
-    # --- 2. HANDLE MISSING VALUES ---
-    with st.expander("🔢 Define Missing Value Imputation Strategies", expanded=True):
-        if missing_df.empty:
-            st.info("No missing values found in the raw data!")
-        else:
-            st.write("💡 **Define imputation strategies for columns with missing data.** (These will apply on 'Apply' button click.)")
+        if cols_for_imputation:
+            # Display configuration for each column
+            col_types = df[cols_for_imputation].dtypes
             
-            cols_with_missing = missing_df['Column'].tolist()
-            
-            with st.form("imputation_form"):
-                st.write("### Set Strategy per Column")
+            for col in cols_for_imputation:
+                dtype = col_types[col]
+                default_strategy = st.session_state.imputation_strategies.get(col, "Keep missing (let model handle)")
                 
-                for col in cols_with_missing:
-                    # Determine if numeric or categorical
-                    is_numeric = pd.api.types.is_numeric_dtype(df[col])
-                    
-                    if is_numeric:
-                        options = ["Keep missing (let model handle)", "Fill with Mean", "Fill with Median", "Fill with Zero", "Drop rows with missing"]
-                        default_strategy = "Fill with Median"
-                    else:
-                        options = ["Keep missing (let model handle)", "Fill with Most Frequent", "Fill with 'Unknown'", "Drop rows with missing"]
-                        default_strategy = "Fill with Most Frequent"
-                    
-                    # Get current setting from session state or use default
-                    current_strategy = st.session_state.imputation_strategies.get(col, default_strategy)
-                    
-                    # Ensure the current strategy is in the options list (in case a column type changes)
-                    if current_strategy not in options:
-                        current_strategy = default_strategy
-                    
-                    # Create a selectbox for each column
-                    new_strategy = st.selectbox(
-                        f"**{col}** ({missing_df[missing_df['Column'] == col]['Missing %'].iloc[0]:.1f}% missing)",
-                        options,
-                        index=options.index(current_strategy),
-                        key=f"impute_strategy_{col}"
-                    )
-                    
-                    # Update session state for the specific column
-                    st.session_state.imputation_strategies[col] = new_strategy
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    strategies = ["Keep missing (let model handle)", "Drop rows with missing", "Fill with Mean", "Fill with Median", "Fill with Zero"]
+                    tooltip = "Use Mean/Median for normal distributions, Zero for count-like features."
+                else: # Categorical/Object
+                    strategies = ["Keep missing (let model handle)", "Drop rows with missing", "Fill with Most Frequent", "Fill with 'Unknown'"]
+                    tooltip = "Use Most Frequent or 'Unknown' for categorical features."
                 
-                submitted = st.form_submit_button("Save Imputation Strategies")
-                if submitted:
-                     st.success("✅ Imputation strategies saved! Click 'Apply All Cleaning' to process the data.")
-        
-    # --- 3. QUICK ACTIONS (Application) ---
-    st.subheader("⚡ Quick Actions (Apply or Reset)")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("🚀 Apply All Custom Cleaning", type="primary", help="Applies all saved instructions (Drop Columns, Duplicates, Target Normalize, and Imputations)"):
-            try:
-                with st.spinner("Applying custom cleaning..."):
-                    # Use the new comprehensive cleaning function
-                    df_clean = apply_custom_cleaning(
-                        st.session_state.df_raw.copy(), 
-                        target_col, 
-                        st.session_state.columns_to_drop, 
-                        st.session_state.imputation_strategies
-                    )
-                    
-                    st.session_state.df_clean = df_clean
-                    st.session_state.target_col = target_col
-                
-                st.success("✅ Custom cleaning complete! Review the final data below.")
-                st.rerun()
-            except ValueError as e:
-                st.error(f"❌ Cleaning Error: {str(e)}")
-                st.warning("Please check your target column and ensure it has two classes.")
-            except Exception as e:
-                 st.error(f"❌ An unexpected error occurred during cleaning: {str(e)}")
-    
-    with col2:
-        if st.button("↩️ Reset to Original Data"):
-            st.session_state.df_clean = None
-            st.session_state.imputation_strategies = {}
-            st.session_state.columns_to_drop = []
-            st.info("🔄 Reset to original raw data and cleared cleaning configurations.")
-            st.rerun()
-    
-    # Show current state (either clean or raw data)
-    st.subheader("📊 Final Data Preview")
-    
-    df_display = st.session_state.df_clean if st.session_state.df_clean is not None else st.session_state.df_raw
-    st.info(f"Currently displaying {'Cleaned Data' if st.session_state.df_clean is not None else 'Raw Data'}: {len(df_display)} rows.")
-    st.dataframe(df_display.head(10), width='stretch')
-
-    # Download cleaned data option
-    if st.session_state.df_clean is not None:
-        st.subheader("📥 Download Cleaned Data")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # CSV download
-            csv = df_display.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download as CSV",
-                data=csv,
-                file_name="cleaned_data.csv",
-                mime="text/csv",
-                help="Download the cleaned dataset in CSV format"
-            )
-    
-    # Show target distribution if available
-    if target_col in df_display.columns:
-        st.subheader("🎯 Target Distribution")
-        try:
-            # Must normalize target column first if it hasn't been done for correct 0/1 counts
-            df_target_check = normalize_target(df_display.copy(), target_col)
-            churn_counts = df_target_check[target_col].value_counts().sort_index()
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                labels = [str(v) for v in churn_counts.index]
-                fig = px.pie(
-                    values=churn_counts.values,
-                    names=labels,
-                    title=f"{target_col} Distribution",
-                    color_discrete_sequence=['#667eea', '#764ba2']
+                # Update strategy in session state
+                st.session_state.imputation_strategies[col] = st.selectbox(
+                    f"**{col}** (Type: *{dtype}* | Missing: {df[col].isnull().sum()} rows)",
+                    options=strategies,
+                    index=strategies.index(default_strategy),
+                    key=f"impute_select_{col}",
+                    help=tooltip
                 )
-                st.plotly_chart(fig, width='stretch')
-            
-            with col2:
-                st.write("**Value Counts:**")
-                for idx, count in churn_counts.items():
-                    st.metric(f"Class {idx}", count)
-                
-                # Check for class balance after custom cleaning
-                if len(churn_counts) < 2:
-                    st.error("❌ The data must have at least two classes (0 and 1) in the target column to train a model.")
-                elif churn_counts.min() < 50:
-                    st.warning("⚠️ Very small class size detected! Consider checking for proper target normalization.")
-        except:
-            st.write(df_display[target_col].value_counts())
+        else:
+            st.info("No columns with missing data remaining after drop selection.")
 
+    # ------------------------------------------------------------------
+    # 3. Apply Cleaning Button
+    st.subheader("🚀 3. Apply Cleaning Steps")
+    
+    if st.button("✨ Apply and View Cleaned Data", key="apply_cleaning_button"):
+        try:
+            with st.spinner("Applying cleaning steps..."):
+                # Pass the raw data, target, configured drops, and imputation strategies
+                df_clean = apply_custom_cleaning(
+                    df=st.session_state.df_raw,
+                    target_col=target_col,
+                    drop_cols=st.session_state.columns_to_drop,
+                    impute_strategies=st.session_state.imputation_strategies
+                )
+                
+                st.session_state.df_clean = df_clean
+                
+                # Clear model results as data has changed
+                st.session_state.results = None
+                st.session_state.models = {}
+                st.session_state.production_model = None
+                st.session_state.production_model_name = None
+                
+                st.success("✅ Data cleaning complete!")
+                
+                st.subheader("🧹 Cleaned Data Preview")
+                st.write(f"Final Data Shape: {df_clean.shape}")
+                
+                target_counts = df_clean[target_col].value_counts().sort_index()
+                st.write("Target Class Distribution (0=No Churn, 1=Churn):")
+                st.dataframe(target_counts, use_container_width=True)
+                
+                st.dataframe(df_clean.head(), use_container_width=True)
+                
+        except ValueError as e:
+            st.error(f"Cleaning Error: {e}")
+        except Exception as e:
+            st.exception(e)
+    
+    # Show cleaned data if it exists
+    if st.session_state.df_clean is not None:
+        st.subheader("✅ Currently Cleaned Data (Ready for Training)")
+        st.write(f"Current Shape: {st.session_state.df_clean.shape}")
+        st.info("💡 Changes in configuration will only apply after clicking the 'Apply Cleaning' button.")
+        
 # ==================== PAGE 4: TRAIN MODELS ====================
 elif page == "🤖 Train Models":
     st.header("🤖 Train Machine Learning Models")
     
-    if st.session_state.df_clean is None or st.session_state.target_col is None:
-        st.warning("⚠️ Please upload and clean your data, and ensure a target column is selected on the 'Upload Data' page!")
-    else:
-        df_clean = st.session_state.df_clean
-        target_col = st.session_state.target_col
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            test_size = st.slider("Test Set Size (%)", 10, 40, 20) / 100
-        with col2:
-            st.metric("Training Samples", int(len(df_clean) * (1 - test_size)))
-        
-        if st.button("🚀 Train All Models", type="primary"):
-            with st.spinner("Training models... This may take a minute."):
-                # Ensure the target column is in the clean dataset before training
-                if target_col not in df_clean.columns:
-                    st.error(f"❌ Target column '{target_col}' is missing. Please review cleaning steps.")
-                else:
-                    results, models, schema, X_test = train_models(df_clean, target_col, test_size)
-                    
-                    st.session_state.results = results
-                    st.session_state.models = models
-                    st.session_state.feature_schema = schema
-                    st.session_state.X_test = X_test
+    if st.session_state.df_clean is None:
+        st.warning("⚠️ Please complete the 'Data Cleaning' step first!")
+        st.stop()
+    
+    df_clean = st.session_state.df_clean
+    target_col = st.session_state.target_col
+    
+    st.info(f"🎯 Training models on **{len(df_clean)} rows** using **{len(df_clean.columns)} features**. Target: **{target_col}**")
+    
+    st.subheader("⚙️ Training Configuration")
+    test_size = st.slider("Test Set Size (%)", min_value=10, max_value=40, value=20, step=5) / 100.0
+    
+    if st.button("🚀 Train All Models", key="train_models_button"):
+        try:
+            with st.spinner("Training models: Logistic Regression, Random Forest, and SVM... This may take a moment."):
                 
-                    st.success("✅ All models trained successfully!")
-                    st.balloons()
-                    
-                    st.subheader("📊 Training Results")
-                    st.dataframe(results.style.highlight_max(axis=0, color='lightgreen'), width='stretch')
-
+                # Check for two classes again
+                if df_clean[target_col].nunique() < 2:
+                     st.error(f"❌ Target column '{target_col}' has less than two unique classes after cleaning. Cannot train.")
+                     st.stop()
+                
+                results_df, trained_models, feature_schema, X_test = train_models(df_clean, target_col, test_size)
+                
+                st.session_state.results = results_df
+                st.session_state.models = trained_models
+                st.session_state.feature_schema = feature_schema
+                st.session_state.X_test = X_test # Store test data for later prediction/analysis
+                
+                st.success("✅ Model training complete!")
+                st.balloons()
+        except Exception as e:
+            st.error("An error occurred during training.")
+            st.exception(e)
+            
+    if st.session_state.results is not None:
+        st.subheader("🏆 Model Performance Summary")
+        
+        # Highlight best F1 score
+        def highlight_max(s):
+            is_max = s == s.max()
+            return ['background-color: #667eea; color: white' if v else '' for v in is_max]
+            
+        styled_results = st.session_state.results.style.apply(highlight_max, subset=['f1']).format({
+            'accuracy': "{:.4f}",
+            'precision': "{:.4f}",
+            'recall': "{:.4f}",
+            'f1': "{:.4f}",
+            'roc_auc': "{:.4f}"
+        })
+        
+        st.dataframe(styled_results, use_container_width=True)
+        
+        # Selection for Production Model
+        best_model_name = st.session_state.results.index[0]
+        
+        st.subheader("🥇 Select Production Model")
+        
+        production_model_name = st.selectbox(
+            f"Choose a model to deploy for predictions (Best based on F1: **{best_model_name}**)",
+            options=st.session_state.results.index.tolist(),
+            index=0,
+            key="prod_model_select"
+        )
+        
+        # Save the selected pipeline and schema
+        st.session_state.production_model = st.session_state.models[production_model_name]['pipeline']
+        st.session_state.production_model_name = production_model_name # Store name
+        
+        st.success(f"Production Model set to: **{production_model_name}**")
+        
+        # ROC Curve Plot
+        st.subheader("📈 ROC Curve Comparison")
+        fig = go.Figure()
+        
+        for name, data in st.session_state.models.items():
+            if data['y_proba'] is not None:
+                fpr, tpr, _ = roc_curve(data['y_test'], data['y_proba'])
+                auc = st.session_state.results.loc[name, 'roc_auc']
+                fig.add_trace(go.Scatter(
+                    x=fpr, y=tpr, mode='lines', name=f"{name} (AUC: {auc:.3f})"
+                ))
+        
+        fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode='lines', line=dict(dash='dash', color='grey'), name='Random Guess (AUC: 0.5)'))
+        fig.update_layout(
+            title='Receiver Operating Characteristic (ROC) Curve',
+            xaxis_title='False Positive Rate (1 - Specificity)',
+            yaxis_title='True Positive Rate (Recall)',
+            height=600
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
 # ==================== PAGE 5: MODEL COMPARISON ====================
 elif page == "📈 Model Comparison":
-    st.header("📈 Model Performance Comparison")
+    st.header("📈 Model Comparison & Diagnostics")
     
     if st.session_state.results is None:
-        st.warning("⚠️ Please train models first!")
-    else:
-        results = st.session_state.results
-        models = st.session_state.models
+        st.warning("⚠️ Please train the models first on the 'Train Models' page!")
+        st.stop()
         
-        # Metrics comparison
-        st.subheader("📈 Performance Metrics")
-        
-        fig = go.Figure()
-        for metric in ['accuracy', 'precision', 'recall', 'f1', 'roc_auc']:
-            fig.add_trace(go.Bar(
-                name=metric.upper(),
-                x=results.index,
-                y=results[metric],
-                text=results[metric].round(3),
-                textposition='auto',
-            ))
-        
-        fig.update_layout(
-            barmode='group',
-            title="Model Performance Comparison",
-            xaxis_title="Model",
-            yaxis_title="Score",
-            height=500
-        )
-        st.plotly_chart(fig, width='stretch')
-        
-        # Best model
-        best_model = results.index[0]
-        st.subheader("🏆 Best Model")
-        st.success(f"**{best_model}** with F1 Score: {results.loc[best_model, 'f1']:.4f}")
-        
-        # Confusion matrices
-        st.subheader("🔢 Confusion Matrices")
-        cols = st.columns(3)
-        
-        for idx, (name, model_data) in enumerate(models.items()):
-            with cols[idx]:
-                cm = confusion_matrix(model_data['y_test'], model_data['y_pred'])
-                fig = px.imshow(
-                    cm,
-                    text_auto=True,
-                    labels=dict(x="Predicted", y="Actual"),
-                    x=['No Churn', 'Churn'],
-                    y=['No Churn', 'Churn'],
-                    title=name,
-                    color_continuous_scale='Purples'
-                )
-                st.plotly_chart(fig, width='stretch')
-        
-        # Deploy to production
-        st.subheader("🚀 Deploy Model")
-        selected_model = st.selectbox("Select model for production", results.index.tolist())
-        
-        if st.button("Deploy to Production", type="primary"):
-            with st.spinner(f"Retraining {selected_model} on full dataset..."):
-                # Get the model class
-                df_clean = st.session_state.df_clean
-                target_col = st.session_state.target_col
-                
-                y = df_clean[target_col].astype(int)
-                X = df_clean.drop(columns=[target_col])
-                
-                # Rebuild preprocessor and get model
-                preprocessor, schema = build_preprocessor(df_clean, target_col)
-                
-                models_def = {
-                    "Logistic Regression": LogisticRegression(max_iter=1000),
-                    "Random Forest": RandomForestClassifier(n_estimators=300, random_state=42),
-                    "SVM": SVC(kernel="rbf", probability=True, random_state=42, max_iter=2000)
-                }
-                
-                # Create pipeline with selected model and train on FULL dataset
-                model = models_def[selected_model]
-                full_pipeline = Pipeline([("prep", preprocessor), ("model", model)])
-                full_pipeline.fit(X, y)
-                
-                st.session_state.production_model = full_pipeline
-                st.session_state.feature_schema = schema
+    st.subheader("📊 Performance Metrics")
+    
+    # Display the results table again
+    def highlight_max(s):
+        is_max = s == s.max()
+        return ['background-color: #667eea; color: white' if v else '' for v in is_max]
             
-            st.success(f"✅ {selected_model} retrained on full dataset and deployed to production!")
-            st.info(f"📊 Model trained on all {len(df_clean)} samples")
+    styled_results = st.session_state.results.style.apply(highlight_max, subset=['f1']).format({
+        'accuracy': "{:.4f}",
+        'precision': "{:.4f}",
+        'recall': "{:.4f}",
+        'f1': "{:.4f}",
+        'roc_auc': "{:.4f}"
+    })
+    st.dataframe(styled_results, use_container_width=True)
+    
+    st.subheader("📉 Detailed Model Diagnostics")
+    
+    selected_model = st.selectbox(
+        "Select Model for Detailed View",
+        options=st.session_state.results.index.tolist()
+    )
+    
+    if selected_model:
+        model_data = st.session_state.models[selected_model]
+        y_test = model_data['y_test']
+        y_pred = model_data['y_pred']
+        
+        st.markdown(f"### Diagnostics for **{selected_model}**")
+        
+        col1, col2 = st.columns(2)
+        
+        # Confusion Matrix
+        with col1:
+            st.subheader("Confusion Matrix")
+            cm = confusion_matrix(y_test, y_pred)
+            cm_df = pd.DataFrame(cm, index=['Actual 0 (No Churn)', 'Actual 1 (Churn)'], columns=['Predicted 0', 'Predicted 1'])
+            
+            fig_cm = px.imshow(
+                cm_df, 
+                text_auto=True, 
+                color_continuous_scale='Blues',
+                labels=dict(x="Predicted Class", y="Actual Class", color="Count"),
+                title="Confusion Matrix"
+            )
+            st.plotly_chart(fig_cm, use_container_width=True)
+            
+            tn, fp, fn, tp = cm.ravel()
+            
+            st.markdown(f"""
+            - **True Negatives (TN):** {tn} (Correctly predicted No Churn)
+            - **False Positives (FP):** {fp} (Incorrectly predicted Churn - **Type I Error**)
+            - **False Negatives (FN):** {fn} (Incorrectly predicted No Churn - **Type II Error**)
+            - **True Positives (TP):** {tp} (Correctly predicted Churn)
+            """)
 
-# ==================== PAGE 6: MAKE PREDICTIONS (MODIFIED) ====================
+        # Feature Importance
+        with col2:
+            st.subheader("Feature Importance / Influence")
+            
+            model_pipe = st.session_state.models[selected_model]['pipeline']
+            schema = st.session_state.feature_schema
+            
+            # Feature Importance (only possible for models with feature_importances_ or coef_)
+            if hasattr(model_pipe.named_steps['model'], 'feature_importances_') or isinstance(model_pipe.named_steps['model'], LogisticRegression):
+                 
+                # Use a dummy single row from X_test for coefficient-based interpretation if LR
+                X_single = st.session_state.X_test.iloc[[0]] 
+                
+                importance_df = get_feature_influence(
+                    pipe=model_pipe, 
+                    X_single_row=X_single,
+                    schema=schema
+                )
+                
+                if not importance_df.empty:
+                    # Determine which column to use for the plot (Prediction_Driver for LR, Influence_Score for others)
+                    influence_col = 'Prediction_Driver' if 'Prediction_Driver' in importance_df.columns else 'Influence_Score'
+                    
+                    if influence_col == 'Prediction_Driver':
+                        importance_df = importance_df.sort_values(influence_col, key=lambda x: x.abs(), ascending=False)
+                        plot_color_col = importance_df[influence_col] > 0
+                        plot_title = "Prediction Driver Score (Top 10 - Prediction Specific)"
+                        x_label = "Impact Score (Coefficient * Value)"
+                        color_scale = 'RdBu_r'
+                    else:
+                        importance_df = importance_df.sort_values(influence_col, ascending=False)
+                        plot_color_col = importance_df[influence_col]
+                        plot_title = "Global Feature Importance (Top 10 - Model Wide)"
+                        x_label = "Feature Importance (MDI)"
+                        color_scale = 'Viridis'
+                        
+                    importance_df = importance_df.head(10)
+                    
+                    fig_imp = px.bar(
+                        importance_df.sort_values(influence_col, ascending=True),
+                        x=influence_col,
+                        y='Feature',
+                        orientation='h',
+                        title=plot_title,
+                        labels={influence_col: x_label, 'Feature': 'Feature'},
+                        color=plot_color_col,
+                        color_continuous_scale=color_scale
+                    )
+                    st.plotly_chart(fig_imp, use_container_width=True)
+                else:
+                    st.warning("⚠️ Feature influence for this specific model configuration could not be calculated.")
+            else:
+                st.warning("⚠️ Feature importance is not directly available for the selected model (e.g., standard SVM).")
+
+# ==================== PAGE 6: MAKE PREDICTIONS ====================
 elif page == "🔮 Make Predictions":
-    st.header("🔮 Predict Customer Churn")
+    st.header("🔮 Make New Churn Predictions")
     
     if st.session_state.production_model is None:
-        st.warning("⚠️ Please deploy a model first!")
-    else:
-        pipe = st.session_state.production_model
-        schema = st.session_state.feature_schema
+        st.warning("⚠️ Please train models and select a Production Model on the 'Train Models' page first!")
+        st.stop()
         
-        # Add prediction mode selector
-        prediction_mode = st.radio(
-            "Select Prediction Mode",
-            ["Single Customer Prediction", "Batch Prediction (Upload CSV)"],
-            horizontal=True
-        )
+    model = st.session_state.production_model
+    model_name = st.session_state.production_model_name
+    schema = st.session_state.feature_schema
+    
+    st.info(f"✅ Ready to predict using the **{model_name}** model.")
+    
+    prediction_type = st.radio(
+        "Choose Prediction Input Type",
+        options=["Single Customer Input", "Bulk Upload (Test Set Sample)"],
+        index=0,
+        horizontal=True
+    )
+    
+    st.markdown("---")
+    
+    # ------------------------------------------------------------------
+    # Single Customer Input
+    if prediction_type == "Single Customer Input":
+        st.subheader("📝 Input Customer Details")
         
-        if prediction_mode == "Single Customer Prediction":
-            st.subheader("🔍 Enter Customer Information")
-            
-            input_data = {}
-            
-            # Create input fields based on schema
-            num_cols = schema['numeric_features']
-            cat_cols = schema['categorical_features']
-            
-            # --- User defines the actionable threshold ---
-            st.subheader("⚙️ Business Threshold Setting")
-            churn_threshold = st.slider(
-                "Actionable Churn Probability Threshold (Probability % above which you intervene)",
-                min_value=5, max_value=95, value=50, step=5
-            ) / 100.0
-            st.info(f"Customers with a probability > **{churn_threshold:.1%}** will be flagged as **High Risk/Churn**.")
-
-            st.markdown("---")
-            
-            # Feature Inputs
-            st.subheader("Customer Inputs")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Numeric Features**")
-                for col in num_cols:
-                    input_data[col] = st.number_input(f"{col}", value=0.0, help=f"Input type: Numeric")
-            
-            with col2:
-                st.markdown("**Categorical Features**")
-                for col in cat_cols:
-                    if st.session_state.df_clean is not None and col in st.session_state.df_clean.columns:
-                        options = st.session_state.df_clean[col].dropna().astype(str).unique().tolist()
-                        if not options:
-                            options = ["N/A"]
-                        
-                        default_index = 0
-                        
-                        input_data[col] = st.selectbox(f"{col}", options, index=default_index, help=f"Input type: Categorical. Options derived from training data.")
-                    else:
-                        input_data[col] = st.text_input(f"{col}", help=f"Input type: Categorical. Cannot determine options.")
-            
-            if st.button("🎯 Predict Churn", type="primary"):
-                # Create DataFrame with correct column order
-                final_input_data = {k: [v] for k, v in input_data.items()}
-                X = pd.DataFrame(final_input_data, columns=num_cols + cat_cols)
+        input_data = {}
+        
+        # Split features into numeric and categorical for better organization
+        num_cols = schema['numeric_features']
+        cat_cols = schema['categorical_features']
+        
+        # Use two columns for input
+        col_num, col_cat = st.columns(2)
+        
+        with col_num:
+            st.markdown("#### Numeric Features")
+            for col in num_cols:
+                # Get min/max/mean from clean data if possible for sensible defaults
+                df_clean = st.session_state.df_clean
                 
-                prediction = pipe.predict(X)[0] # Standard 0.5 threshold prediction
-                proba = pipe.predict_proba(X)[0, 1]
-                
-                # Dynamic prediction based on user threshold
-                dynamic_prediction = 1 if proba >= churn_threshold else 0
-
-                # --- NEW: Feature Influence Calculation ---
                 try:
-                    influence_df = get_feature_influence(pipe, X, schema)
-                except Exception as e:
-                    st.error(f"Could not calculate feature influence: {e}")
-                    influence_df = pd.DataFrame()
+                    min_val = df_clean[col].min()
+                    max_val = df_clean[col].max()
+                    mean_val = df_clean[col].mean()
+                except:
+                    min_val, max_val, mean_val = 0.0, 100.0, 50.0
                 
+                input_data[col] = st.number_input(
+                    f"**{col}**",
+                    min_value=min_val if pd.notna(min_val) else 0.0,
+                    max_value=max_val if pd.notna(max_val) else 10000.0,
+                    value=mean_val if pd.notna(mean_val) else 50.0,
+                    step=(max_val - min_val) / 20 if (max_val - min_val) > 0 else 1.0,
+                    format="%.2f",
+                    key=f"input_num_{col}"
+                )
+                
+        with col_cat:
+            st.markdown("#### Categorical Features")
+            for col in cat_cols:
+                # Get unique values from clean data
+                df_clean = st.session_state.df_clean
+                
+                try:
+                    options = df_clean[col].dropna().unique().tolist()
+                    if 'Unknown' not in options: options.append('Unknown') # Add "Unknown" for imputation
+                    default_index = options.index(df_clean[col].mode()[0]) if len(df_clean[col].mode()) > 0 and df_clean[col].mode()[0] in options else 0
+                except:
+                    options = ["A", "B", "C", "Unknown"]
+                    default_index = 0
+                
+                input_data[col] = st.selectbox(
+                    f"**{col}**",
+                    options=options,
+                    index=default_index,
+                    key=f"input_cat_{col}"
+                )
+                
+        if st.button("Calculate Churn Probability", key="predict_single_button", use_container_width=True):
+            try:
+                # Create DataFrame from input
+                input_df = pd.DataFrame([input_data])
+                
+                # Make prediction
+                pred_proba = model.predict_proba(input_df)[0][1]
+                prediction = model.predict(input_df)[0]
+                
+                st.subheader("Prediction Result")
+                col_pred, col_proba = st.columns(2)
+                
+                with col_pred:
+                    churn_status = "CHURN" if prediction == 1 else "NO CHURN"
+                    icon = "🔥" if prediction == 1 else "✅"
+                    st.markdown(f'<div class="metric-card"><h2>{icon} {churn_status}</h2></div>', unsafe_allow_html=True)
+                
+                with col_proba:
+                    st.metric("Churn Probability", f"{pred_proba * 100:.2f}%")
                 
                 st.markdown("---")
-                st.subheader("🔮 Prediction Result")
                 
-                # Display dynamic prediction
-                if dynamic_prediction == 1:
-                    st.error("⚠️ **High Risk of CHURN** (Intervention Recommended)")
-                    st.markdown(f"### Churn Probability: {proba*100:.1f}% (Above {churn_threshold:.1%} Threshold)")
-                else:
-                    st.success("✅ **Low Risk** (Retention Likely)")
-                    st.markdown(f"### Retention Probability: {(1-proba)*100:.1f}% (Below {churn_threshold:.1%} Threshold)")
+                # Model Interpretation (Feature Influence)
+                st.subheader("🧠 Model Interpretation (Why this prediction?)")
                 
-                # Probability gauge
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=proba * 100,
-                    title={'text': "Churn Risk"},
-                    gauge={
-                        'axis': {'range': [0, 100]},
-                        'bar': {'color': "darkred" if proba > churn_threshold else "darkgreen"},
-                        'steps': [
-                            {'range': [0, churn_threshold * 100], 'color': "lightgreen"},
-                            {'range': [churn_threshold * 100, 100], 'color': "lightcoral"}
-                        ],
-                        'threshold': {
-                            'line': {'color': "red", 'width': 4},
-                            'thickness': 0.75,
-                            'value': churn_threshold * 100
-                        }
-                    }
-                ))
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, width='stretch')
+                # The get_feature_influence function is designed to handle this
+                influence_df = get_feature_influence(model, input_df, schema)
                 
-                # --- Why this Prediction? (Applicability Improvement) ---
                 if not influence_df.empty:
-                    st.subheader("💡 Key Drivers for This Prediction (Interpretability)")
+                    influence_col = 'Prediction_Driver' if 'Prediction_Driver' in influence_df.columns else 'Influence_Score'
                     
-                    # Customize the description based on the deployed model type
-                    if 'Prediction_Driver' in influence_df.columns:
-                        st.markdown(f"The **{pipe.named_steps['model'].__class__.__name__}** model uses the following factors to calculate this risk:")
-                        
-                        # Split drivers into CHURN (positive) and RETENTION (negative)
-                        churn_drivers = influence_df[influence_df['Prediction_Driver'] > 0]
-                        retention_drivers = influence_df[influence_df['Prediction_Driver'] < 0]
-
-                        col1_inf, col2_inf = st.columns(2)
-                        
-                        with col1_inf:
-                            st.markdown("**Top Drivers for CHURN/Risk (Positive Contribution):**")
-                            if not churn_drivers.empty:
-                                for _, row in churn_drivers.head(3).iterrows():
-                                    # Clean up feature name (e.g., from 'col__value' to 'Col = Value')
-                                    feature_display = row['Feature'].split('__')
-                                    if len(feature_display) > 1:
-                                        display_text = f"**{feature_display[0]}** = **{feature_display[1]}**"
-                                    else:
-                                        display_text = f"**{feature_display[0]}**"
-                                        
-                                    st.write(f"1. ⬆️ **{display_text}** (Contribution: +{row['Prediction_Driver']:.3f})")
-                            else:
-                                st.write("*(No significant positive drivers found)*")
-
-                        with col2_inf:
-                            st.markdown("**Top Drivers for RETENTION (Negative Contribution):**")
-                            if not retention_drivers.empty:
-                                for _, row in retention_drivers.sort_values(by='Prediction_Driver', ascending=True).head(3).iterrows():
-                                    feature_display = row['Feature'].split('__')
-                                    if len(feature_display) > 1:
-                                        display_text = f"**{feature_display[0]}** = **{feature_display[1]}**"
-                                    else:
-                                        display_text = f"**{feature_display[0]}**"
-
-                                    st.write(f"1. ⬇️ **{display_text}** (Contribution: {row['Prediction_Driver']:.3f})")
-                            else:
-                                st.write("*(No significant negative drivers found)*")
+                    st.write("Top 5 features influencing this specific prediction:")
                     
-                    else:
-                        st.markdown("Top 5 *Globally* Important Features (Feature influence per prediction is not available for this model type):")
-                        for _, row in influence_df.iterrows():
-                            st.write(f"- **{row['Feature']}** (Importance: {row['Influence_Score']:.3f})")
+                    fig_influence = px.bar(
+                        influence_df.sort_values(influence_col, ascending=True),
+                        x=influence_col,
+                        y='Feature',
+                        orientation='h',
+                        title="Top Feature Drivers",
+                        labels={influence_col: "Impact Score", 'Feature': 'Feature'},
+                        color=influence_col,
+                        color_continuous_scale='RdBu_r' # Red/Blue diverging scale for impact
+                    )
+                    st.plotly_chart(fig_influence, use_container_width=True)
+                else:
+                    st.warning("Cannot provide detailed feature influence for this model type.")
+                    
+            except Exception as e:
+                st.error("An error occurred during prediction.")
+                st.exception(e)
 
+    # ------------------------------------------------------------------
+    # Bulk Upload (Test Set Sample)
+    elif prediction_type == "Bulk Upload (Test Set Sample)":
+        st.subheader("📤 Bulk Prediction (Test Set Sample)")
         
-        else:  # Batch Prediction
-            st.subheader("📁 Upload CSV File for Batch Predictions")
-            st.info("💡 Upload a CSV file with customer data. The file should NOT include the target column.")
+        if st.session_state.X_test is None:
+            st.warning("⚠️ Please train models first to generate the test set sample.")
+            st.stop()
             
-            # --- User defines the actionable threshold for batch prediction ---
-            st.subheader("⚙️ Business Threshold Setting")
-            batch_churn_threshold = st.slider(
-                "Actionable Churn Probability Threshold",
-                min_value=5, max_value=95, value=50, step=5, key='batch_thresh'
-            ) / 100.0
-            
-            batch_file = st.file_uploader(
-                "Upload CSV for batch predictions",
-                type=['csv'],
-                key="batch_upload"
-            )
-            
-            if batch_file is not None:
-                batch_df = pd.read_csv(batch_file)
-                
-                st.success(f"✅ File loaded: {len(batch_df)} customers")
-                st.dataframe(batch_df.head(), width='stretch')
-                
-                if st.button("🎯 Predict All", type="primary"):
-                    try:
-                        with st.spinner("Making predictions..."):
-                            # Ensure columns match expected features
-                            num_cols = schema['numeric_features']
-                            cat_cols = schema['categorical_features']
-                            expected_cols = num_cols + cat_cols
-                            
-                            # Check for missing columns
-                            missing_cols = [col for col in expected_cols if col not in batch_df.columns]
-                            if missing_cols:
-                                raise ValueError(f"Batch data is missing required features: {', '.join(missing_cols)}")
-                            
-                            # Reorder columns to match training
-                            X_batch = batch_df[expected_cols]
-                            
-                            # Make predictions
-                            predictions = pipe.predict(X_batch) # Standard prediction (uses model's default 0.5 threshold)
-                            probabilities = pipe.predict_proba(X_batch)[:, 1]
-                            
-                            # Dynamic prediction based on user threshold
-                            dynamic_predictions = (probabilities >= batch_churn_threshold).astype(int)
-                            
-                            # Add predictions to dataframe
-                            result_df = batch_df.copy()
-                            result_df['Churn_Prediction'] = dynamic_predictions
-                            result_df['Churn_Probability'] = probabilities
-                            
-                            # Dynamic Risk Level based on user threshold
-                            def get_risk_level(prob):
-                                if prob >= batch_churn_threshold:
-                                    return 'High Risk'
-                                elif prob >= (batch_churn_threshold * 0.75): # Slightly below threshold is Medium
-                                    return 'Medium Risk'
-                                else:
-                                    return 'Low Risk'
-
-                            result_df['Risk_Level'] = result_df['Churn_Probability'].apply(get_risk_level)
+        X_test = st.session_state.X_test
+        y_test = st.session_state.models[model_name]['y_test']
+        
+        st.info(f"Using the **{len(X_test)}** row test set sample for bulk prediction.")
+        
+        if st.button("Run Bulk Prediction on Test Set", key="predict_bulk_button", use_container_width=True):
+            try:
+                with st.spinner("Calculating bulk predictions..."):
+                    # Predict probability and class
+                    y_proba_bulk = model.predict_proba(X_test)[:, 1]
+                    y_pred_bulk = model.predict(X_test)
+                    
+                    # Create results DataFrame
+                    results_df_bulk = X_test.copy()
+                    results_df_bulk['Actual Churn'] = y_test
+                    results_df_bulk['Predicted Churn'] = y_pred_bulk
+                    results_df_bulk['Churn Probability'] = y_proba_bulk
+                    
+                    st.success("✅ Bulk prediction complete!")
+                    
+                    # Display results
+                    st.subheader("Bulk Prediction Results")
+                    st.dataframe(results_df_bulk.head(10), use_container_width=True)
+                    
+                    # Download button
+                    csv = results_df_bulk.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="Download Full Prediction CSV",
+                        data=csv,
+                        file_name='churn_predictions_bulk.csv',
+                        mime='text/csv',
+                        key='download_bulk_csv'
+                    )
+                    
+                    st.markdown("---")
+                    
+                    # Display Accuracy on Test Set
+                    st.subheader("Performance on Test Set")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Accuracy Score", f"{accuracy_score(y_test, y_pred_bulk):.4f}")
+                    with col2:
+                        st.metric("ROC AUC Score", f"{roc_auc_score(y_test, y_proba_bulk):.4f}")
                         
-                        st.success("✅ Predictions completed!")
-                        
-                        # Summary metrics based on user-defined threshold
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Total Customers", len(result_df))
-                        with col2:
-                            st.metric(f"Customers to Intervene (Risk > {batch_churn_threshold:.1%})", (dynamic_predictions == 1).sum())
-                        with col3:
-                            intervention_rate = (dynamic_predictions == 1).mean() * 100
-                            st.metric("Intervention Rate", f"{intervention_rate:.1f}%")
-                        
-                        # Risk distribution
-                        st.subheader("📊 Risk Distribution (Based on User Threshold)")
-                        risk_counts = result_df['Risk_Level'].value_counts()
-                        fig = px.pie(
-                            values=risk_counts.values,
-                            names=risk_counts.index,
-                            title="Customer Risk Distribution",
-                            color_discrete_sequence=['#764ba2', '#FFA500', '#667eea']
-                        )
-                        st.plotly_chart(fig, width='stretch')
-                        
-                        # Results table
-                        st.subheader("📋 Prediction Results")
-                        st.dataframe(
-                            result_df.sort_values('Churn_Probability', ascending=False),
-                            width='stretch'
-                        )
-                        
-                        # Download results
-                        csv = result_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Download Predictions as CSV",
-                            data=csv,
-                            file_name="churn_predictions.csv",
-                            mime="text/csv"
-                        )
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error making predictions: {str(e)}")
-                        st.info("💡 Make sure your CSV has all the required features with correct names.")
-
-# Sidebar info
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 App Status")
-if st.session_state.df_raw is not None:
-    st.sidebar.success("✅ Data Uploaded")
-    if st.session_state.target_col:
-        st.sidebar.write(f"Target: **{st.session_state.target_col}**")
-else:
-    st.sidebar.info("⏳ Awaiting Data")
-
-if st.session_state.df_clean is not None:
-    st.sidebar.success("✅ Data Cleaned")
-else:
-    st.sidebar.info("⏳ Awaiting Cleaning")
-
-if st.session_state.results is not None:
-    st.sidebar.success("✅ Models Trained")
-else:
-    st.sidebar.info("⏳ Awaiting Training")
-
-if st.session_state.production_model is not None:
-    st.sidebar.success("✅ Model Deployed")
-else:
-    st.sidebar.info("⏳ Awaiting Deployment")
+            except Exception as e:
+                st.error("An error occurred during bulk prediction.")
+                st.exception(e)
