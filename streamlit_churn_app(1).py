@@ -28,7 +28,7 @@ from sklearn.metrics import (
 
 # ==================== CONFIGURATION ====================
 st.set_page_config(
-    page_title="Churn Prediction Platform",
+    page_title="Customer Retention Analysis",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
