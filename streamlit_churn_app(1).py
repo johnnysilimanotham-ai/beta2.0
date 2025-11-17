@@ -579,8 +579,8 @@ elif page == "📊 Data Visualization":
         # Correlation analysis
         numeric_cols_no_target = [c for c in numeric_cols if c != target_col]
         if len(numeric_cols_no_target) >= 1: # Now checks if we have at least one numeric feature to correlate
-            st.subheader("🔥 Correlation Analysis")
-            st.write("💡 **Insight:** Highly correlated features (>0.9) might be redundant. Target correlation shows feature importance.")
+            st.subheader("🔥 Multicollinearity Check (Feature Analysis)")
+            st.write("💡 **Insight:** Highly correlated features (>0.9) might be redundant.")
             
             # --- Feature-Feature Correlation Heatmap ---
             if len(numeric_cols_no_target) > 1:
@@ -590,7 +590,7 @@ elif page == "📊 Data Visualization":
                 fig = px.imshow(
                     corr_matrix,
                     text_auto='.2f',
-                    title="Feature Correlation Heatmap (Excluding Target)",
+                    title="Feature Correlation Heatmap (EXCLUDING Target Feature)",
                     color_continuous_scale='RdBu_r',
                     aspect="auto",
                     zmin=-1,
